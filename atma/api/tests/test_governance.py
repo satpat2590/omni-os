@@ -46,6 +46,7 @@ def test_local_provider_and_malformed_output_fallback(owner, monkeypatch):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(reply)
+    monkeypatch.setattr("socket.getfqdn", lambda *args: "localhost")
     with HTTPServer(("127.0.0.1",0),Server) as server:
         thread = Thread(target=server.serve_forever,daemon=True)
         thread.start()

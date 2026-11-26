@@ -80,7 +80,7 @@ def cluster(bindir, env):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["install","check","start","stop-db","refresh","add","complete","status"], default="install", nargs="?")
+    parser.add_argument("action", choices=["install","check","test","start","stop-db","refresh","add","complete","status"], default="install", nargs="?")
     parser.add_argument("value", nargs="?", help="Task title or task ID")
     args = parser.parse_args()
     uv, bindir = preflight()
@@ -129,6 +129,20 @@ def main():
         return
     if args.action == "refresh":
         run(STATE/"base/bin/omni", "--registry", REGISTRY, "run", "mindmap", env=env)
+        return
+    if args.action == "test":
+        cluster(bindir, env)
+        env["ATMA_TEST_SERVER_URL"] = "dbname=postgres"
+        # Test fixtures inherit this install's private socket and create disposable databases.
+        for component, directory in (("api","atma/api"), ("app","atma/app")):
+            cwd = ROOT / directory
+            run(uv,"pip","install","--python",python(component),"-r","requirements-dev.txt",cwd=cwd)
+            run(python(component),"-m","pytest","-q","tests",cwd=cwd,env=env)
+        run(uv,"pip","install","--python",python("base"),"pytest","-e",ROOT/"lib")
+        run(python("base"),"-m","pytest","-q","core/tests","classify/tests","lib/tests","tests",cwd=ROOT,env=env)
+        for suite in ("test_omni_branch.sh","test_omni_merge_lane.sh"):
+            run("bash",ROOT/"omni-sdlc/tests"/suite,cwd=ROOT,
+                env={**env,"OMNI_PYTHON":str(python("base"))})
         return
     if api_port == app_port:
         parser.error("API and dashboard need distinct ports")

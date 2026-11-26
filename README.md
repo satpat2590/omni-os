@@ -70,6 +70,8 @@ Open <http://127.0.0.1:18701> for the dashboard or <http://127.0.0.1:18702/docs>
 
 The private cluster, owner token and environments live in the ignored `.omni-local/` directory. Ctrl-C stops the two web services. Run `./install.sh stop-db` to stop Postgres and `./install.sh start` to resume. Set `OMNI_LOCAL_API_PORT` and `OMNI_LOCAL_APP_PORT` in both terminals if those ports are occupied. The generated local registry runs the graph renderer through the script harness. The installer creates no system launchd jobs. Use synthetic or low-sensitivity data for this single-user alpha. The dashboard and some read APIs still trust local clients.
 
+Run `./install.sh test` after installation to test Atma, the renderer, the classifier, the runner and the development tooling together. The API tests create disposable databases in the private cluster.
+
 ### AI configuration
 
 Offline tagging is the default. For a locally served chat model set `OMNI_AI_PROVIDER=local`, `OMNI_AI_MODEL` and optionally `OMNI_LOCAL_BASE_URL` (default HTTP loopback port 8080, path /v1) before starting. For OpenRouter set `OMNI_AI_PROVIDER=openrouter`, `OMNI_AI_MODEL` and `OPENROUTER_API_KEY` in the launch environment. Model selection is operator controlled. See the [OpenRouter chat contract](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion).
