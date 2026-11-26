@@ -1,0 +1,56 @@
+# Omni ontology (base example): Atma and Omni only, no agents bound.
+# A machine keeps its own omni_ontology.yaml on its instance branch; the classifier loads that
+# instead when it exists. Add realms (domains) and agents there.
+#
+#   realms.<name>.meaning     — one/two-word semantic meaning (used in Jev prompts)
+#   realms.<name>.description — what activities/concerns fall in this realm
+#   realms.<name>.keywords    — deterministic keyword floor (keyword_classify)
+#   realms.<name>.agents      — bound agents (also declared under `agents`)
+#   agents.<name>.realm/.role — agent identity + responsibility
+
+version: 1
+realms:
+  atma:
+    meaning: the self / growth
+    tongue: आत्मन्
+    repo: ~/omni/atma
+    description: 'The meta-realm of growth: tasks, verification, learning, skill trees, points, curriculum,
+      personal growth across all realms.
+
+      '
+    keywords:
+    - task
+    - growth
+    - verify
+    - verification
+    - points
+    - learning
+    - curriculum
+    - skill
+    - goal
+    - streak
+    - atma
+    - canary
+    agents: []
+  omni:
+    meaning: the glue
+    tongue: ὅμος
+    repo: ~/omni
+    description: 'The meta-realm: dashboards, monitoring, orchestration, agent coordination, system health,
+      infrastructure, collectors.
+
+      '
+    keywords:
+    - dashboard
+    - monitor
+    - cron
+    - agent
+    - orchestration
+    - system
+    - infra
+    - collector
+    - mindmap
+    - kingdom
+    - gateway
+    agents: []
+agents: {}

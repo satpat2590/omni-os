@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atma — dashboard</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%2358a6ff'/></svg>">
+<link rel="stylesheet" href="/static/css/dashboard.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- ─── HEADER ─────────────────────────────────── -->
+  <header id="header">
+    <h1>
+      <span class="accent">Atma</span>
+      <span class="verified" id="header-verified">—</span>
+    </h1>
+    <div class="meta" id="header-date"></div>
+  </header>
+
+  <!-- ─── TRIAGE / ROUTING BOARD ─────────────────────── -->
+  <div class="panel" id="triage-panel">
+    <div class="panel-header">
+      triage · routing
+      <span class="ph-count" id="triage-count"></span>
+    </div>
+    <div class="panel-body loading" id="triage-body">loading…</div>
+  </div>
+
+  <!-- ─── AGENT EXPERTISE ─────────────────────────────── -->
+  <div class="panel" id="agents-panel">
+    <div class="panel-header">
+      agents · expertise
+      <span class="ph-count" id="agents-count"></span>
+    </div>
+    <div class="panel-body loading" id="agents-body">loading…</div>
+  </div>
+
+  <!-- ─── ROW 1: GROWTH (left) + LESSONS (right) ─── -->
+  <div class="dashboard-grid">
+    <div class="dashboard-col">
+
+      <!-- GROWTH PANEL -->
+      <div class="panel" id="growth-panel">
+        <div class="panel-header">
+          growth · 28d
+          <span class="ph-count" id="growth-count"></span>
+        </div>
+        <div class="panel-body loading" id="growth-body">loading…</div>
+      </div>
+
+      <!-- MINDMAP PANEL -->
+      <div class="panel" id="mindmap-panel">
+        <div class="panel-header mm-bar">
+          mindmap
+          <a href="/mindmap" target="_blank">open full ↪</a>
+        </div>
+        <div class="panel-body">
+          <iframe src="/mindmap" title="Omni Growth Mindmap"></iframe>
+        </div>
+      </div>
+
+    </div>
+    <div class="dashboard-col">
+
+      <!-- GYANI LESSONS -->
+      <div class="panel" id="lessons-panel">
+        <div class="panel-header">
+          gyani · lessons
+          <span class="ph-count" id="lessons-count"></span>
+        </div>
+        <div class="panel-body loading" id="lessons-body">loading…</div>
+      </div>
+
+      <!-- VERIFICATION QUEUE -->
+      <div class="panel" id="verif-panel">
+        <div class="panel-header">
+          verification queue
+          <span class="ph-count" id="verif-count"></span>
+        </div>
+        <div class="panel-body loading" id="verif-body">loading…</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── ROW 2: HABITS + ALIGNMENT ───────────────── -->
+  <div class="bottom-row">
+
+    <!-- HABIT GRID -->
+    <div class="panel" id="habits-panel">
+      <div class="panel-header">
+        habits · 7d
+        <span class="ph-count" id="habits-count"></span>
+      </div>
+      <div class="panel-body loading" id="habits-body">loading…</div>
+    </div>
+
+    <!-- ALIGNMENT DELTA -->
+    <div class="panel" id="alignment-panel">
+      <div class="panel-header">
+        alignment · latest
+        <span class="ph-count" id="alignment-date"></span>
+      </div>
+      <div class="panel-body loading" id="alignment-body">loading…</div>
+    </div>
+
+  </div>
+
+  <!-- ─── ROW 3: SUBMISSIONS ──────────────────────── -->
+  <div class="panel" id="submissions-panel">
+    <div class="panel-header">
+      submissions · drive
+      <span class="ph-count" id="submissions-count"></span>
+    </div>
+    <div class="panel-body loading" id="submissions-body">loading…</div>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+
+<!-- LESSON VIEWER MODAL -->
+<div id="lesson-modal" style="display:none">
+  <div class="lesson-modal-backdrop" onclick="closeLesson()"></div>
+  <div class="lesson-modal-content">
+    <button class="lesson-modal-close" onclick="closeLesson()">&times;</button>
+    <div id="lesson-modal-body"></div>
+  </div>
+</div>
+
+<!-- TUTOR CHAT -->
+<div id="tutor-panel">
+  <div class="tutor-header" onclick="document.getElementById('tutor-panel').classList.toggle('open')">
+    <span>💬 Ask Gyani</span>
+    <span class="tutor-mode-switch" onclick="event.stopPropagation()">
+      <button class="tutor-mode-btn active" id="tutor-mode-tutor" onclick="setTutorMode('tutor')">tutor</button>
+      <button class="tutor-mode-btn" id="tutor-mode-practice" onclick="setTutorMode('practice')">practice</button>
+    </span>
+    <span class="tutor-toggle">▼</span>
+  </div>
+  <div class="tutor-body">
+    <div id="tutor-feed">
+      <div class="tutor-msg gyani">
+        <div class="tutor-bubble welcome">
+          I'm Gyani, your professor. I know what you're studying — ask me anything about your lessons and I'll help you understand. (Not grading — just tutoring.)
+        </div>
+      </div>
+    </div>
+    <div class="tutor-input-row">
+      <input id="tutor-input" placeholder="Ask about your lessons…" autocomplete="off">
+      <button onclick="sendTutorMessage()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── helpers ─────────────────────────────────────────────────── */
+const esc = s => String(s ?? '-').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const signed = (v, d = 2) => v == null ? '-' : (v > 0 ? '+' : '') + (+v).toFixed(d).replace(/\.?0+$/, m => m.includes('.') ? '' : m);
+
+const DAY_NAMES = ['sun','mon','tue','wed','thu','fri','sat'];
+
+function relDate(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso.split('T')[0]);
+  const now = new Date();
+  const diff = Math.floor((now - d) / 864e5);
+  if (diff === 0) return 'today';
+  if (diff === 1) return 'yesterday';
+  if (diff < 7) return diff + 'd ago';
+  if (diff < 30) return Math.floor(diff / 7) + 'w ago';
+  return iso.slice(0, 10);
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso.slice(0, 10) + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+const DOMAIN_ICONS = {
+  physical: '🏋️', mental: '🧠', financial: '💰', social: '🤝',
+  fitness: '🏋️', health: '❤️', edoras: '📈'
+};
+
+/* ── API fetch ───────────────────────────────────────────────── */
+async function jget(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return { _error: 'HTTP ' + r.status };
+    return await r.json();
+  } catch (e) {
+    return { _error: e.message };
+  }
+}
+
+/* ── PANEL: Header ───────────────────────────────────────────── */
+function renderHeader(g) {
+  const t = (g && g.today) || {};
+  const v = t.verified ?? 0;
+  const tot = t.daily_total ?? 0;
+  document.getElementById('header-verified').textContent =
+    tot ? v + '/' + tot + ' verified ✓' : '—';
+  document.getElementById('header-date').textContent =
+    new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+/* ── PANEL: Growth ───────────────────────────────────────────── */
+function renderGrowth(g) {
+  const body = document.getElementById('growth-body');
+  const count = document.getElementById('growth-count');
+  if (!g || g._error || g.error) {
+    body.className = 'panel-body panel-error';
+    body.textContent = 'growth data unavailable';
+    count.textContent = '';
+    return;
+  }
+  const doms = g.domains || {};
+  const names = ['physical', 'mental', 'financial', 'social'].filter(n => doms[n]);
+  if (!names.length) {
+    body.className = 'panel-body empty';
+    body.textContent = 'no domain data yet';
+    return;
+  }
+  const total = Object.values(doms).reduce((s, d) => s + (d.tasks || 0), 0);
+  count.textContent = total + ' tasks · 4 domains';
+
+  const cards = names.map(n => {
+    const d = doms[n];
+    const score = d.growth_score ?? 0;
+    const cls = score >= 1.0 ? 'green' : score >= 0.4 ? 'amber' : 'red';
+    return `<div class="domain-card">
+      <div class="dc-label">${esc(n)}</div>
+      <div class="dc-score ${cls}">${(d.growth_score ?? 0).toFixed(2)}</div>
+      <div class="dc-meta">${d.completed_28d ?? 0} completions · ${d.tasks ?? 0} tasks</div>
+    </div>`;
+  }).join('');
+
+  body.className = 'panel-body';
+  body.innerHTML = `<div class="domain-cards">${cards}</div>`;
+}
+
+/* ── PANEL: Gyani Lessons ────────────────────────────────────── */
+function renderLessons(data) {
+  const body = document.getElementById('lessons-body');
+  const count = document.getElementById('lessons-count');
+  if (!data || data._error || data.error) {
+    body.className = 'panel-body panel-error';
+    body.textContent = 'lessons unavailable';
+    return;
+  }
+  const lessons = (data.lessons || []).slice(0, 8);
+  if (!lessons.length) {
+    body.className = 'panel-body empty';
+    body.textContent = 'no lessons designed yet';
+    count.textContent = '';
+    return;
+  }
+  count.textContent = (data.lessons || []).length + ' total';
+
+  const items = lessons.map(l => {
+    const icon = DOMAIN_ICONS[l.domain] || '📝';
+    return `<div class="lesson-item">
+      <div class="lesson-icon ${esc(l.domain)}">${icon}</div>
+      <div class="lesson-info">
+        <a class="lesson-title" href="#" onclick="viewLesson('${esc(l.path || '')}');return false" title="View lesson">${esc(l.title)}</a>
+        <div class="lesson-meta">${esc(l.domain)} · ${relDate(l.date)} · ${l.size_kb ?? 0} KB</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  body.className = 'panel-body';
+  body.innerHTML = items;
+}
+
+/* ── PANEL: Verification Queue ───────────────────────────────── */
+function renderVerifications(data) {
+  const body = document.getElementById('verif-body');
+  const count = document.getElementById('verif-count');
+  if (!data || data._error || data.error) {
+    body.className = 'panel-body panel-error';
+    body.textContent = 'verification data unavailable';
+    return;
+  }
+  const pending = data.pending || [];
+  const verified = data.verified || [];
+  const STAGE = {
+    designing: ['designing', 'pending'],
+    ready:     ['ready',     'ready'],
+    examining: ['examining', 'examining'],
+    passed:    ['passed',    'done'],
+    failed:    ['failed',    'failed'],
+    abandoned: ['abandoned', 'pending'],
+    locked:    ['locked',    'pending'],
+  };
+  const readyCount = pending.filter(p => p.stage === 'ready' && !p.locked).length;
+  const lockedCount = pending.filter(p => p.locked).length;
+  const examining = pending.filter(p => p.stage === 'examining').length;
+  count.textContent = readyCount + ' ready' +
+    (lockedCount ? ' · ' + lockedCount + ' locked' : '') +
+    (examining ? ' · ' + examining + ' examining' : '') +
+    ' · ' + verified.length + ' done';
+
+  if (!pending.length && !verified.length) {
+    body.className = 'panel-body empty';
+    body.textContent = 'no verifications yet';
+    return;
+  }
+
+  let html = '';
+  if (pending.length) {
+    html += '<div class="section-label">curriculum</div>';
+    pending.slice(0, 8).forEach(p => {
+      const [label, cls] = STAGE[p.stage] || STAGE.designing;
+      const meta = p.quality ? 'q' + p.quality + (p.max_level ? ' · L' + p.max_level : '')
+                             : 'pri ' + p.priority;
+      const title = (p.lesson_path && !p.locked)
+        ? `<a class="verif-title" href="#" onclick="viewLesson('${esc(p.lesson_path)}');return false">${esc(p.title)}</a>`
+        : `<span class="verif-title">${esc(p.title)}</span>`;
+      html += `<div class="verif-item${p.locked ? ' locked' : ''}"${p.notes ? ` title="${esc(p.notes)}"` : ''}>
+        <span class="badge ${cls}">${label}</span>
+        ${title}
+        <span class="verif-meta">${meta}${p.lock_reason ? ' · 🔒 needs ' + esc(p.lock_reason) : ''}${p.tag_proficiency ? ' · score ' + p.tag_proficiency.toFixed(1) : ''}</span>
+        ${p.stage === 'ready' && p.lesson_path ? '<a class="exam-start" href="https://t.me/gyaniomnibot" target="_blank" title="Message Gyani to start the exam">start exam →</a>' : ''}
+      </div>`;
+    });
+  }
+  if (verified.length) {
+    html += '<div class="section-label" style="margin-top:10px">recently verified</div>';
+    verified.slice(0, 5).forEach(v => {
+      html += `<div class="verif-item">
+        <span class="badge done">done</span>
+        <span class="verif-title">${esc(v.title)}</span>
+        <span class="verif-meta">${relDate(v.completed_at)}</span>
+      </div>`;
+    });
+  }
+
+  body.className = 'panel-body';
+  body.innerHTML = html;
+}
+
+/* ── PANEL: Habit Grid ───────────────────────────────────────── */
+function renderHabits(data) {
+  const body = document.getElementById('habits-body');
+  const count = document.getElementById('habits-count');
+  if (!data || data._error || data.error) {
+    body.className = 'panel-body panel-error';
+    body.textContent = 'habit data unavailable';
+    return;
+  }
+  const habits = data.habits || {};
+  const LABELS = {
+    workout: 'workout', reading: 'reading', shipping: 'shipping'
+  };
+  const today = new Date().toISOString().slice(0, 10);
+
+  const rows = Object.entries(LABELS).map(([key, label]) => {
+    const days = habits[key] || [];
+    const doneCount = days.filter(d => d.done).length;
+
+    const dots = days.map(d => {
+      const isToday = d.date === today;
+      let cls = d.done ? 'done' : 'miss';
+      if (isToday) cls += ' today';
+      const dayName = new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+      return `<span class="habit-dot ${cls}" title="${dayName} · ${d.date}${d.done ? ' ✓' : ' ✗'}"></span>`;
+    }).join('');
+
+    return `<div class="habit-row">
+      <span class="habit-label">${label}</span>
+      <span class="habit-dots">${dots}</span>
+      <span class="habit-count">${doneCount}/7</span>
+    </div>`;
+  }).join('');
+
+  // Day-of-week labels
+  const dayLabels = daysFromHabits(habits).map(d => {
+    const day = new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+    return '<span class="habit-dl">' + day.charAt(0) + '</span>';
+  }).join('');
+
+  const totalDone = Object.values(habits).flat().filter(d => d.done).length;
+  count.textContent = totalDone + '/21 done';
+
+  body.className = 'panel-body';
+  body.innerHTML = rows + '<div class="habit-day-labels">' + dayLabels + '</div>';
+}
+
+function daysFromHabits(habits) {
+  // Extract ordered unique dates from any habit array
+  const seen = new Set();
+  const dates = [];
+  for (const arr of Object.values(habits)) {
+    for (const d of arr) {
+      if (!seen.has(d.date)) {
+        seen.add(d.date);
+        dates.push(d.date);
+      }
+    }
+  }
+  return dates.sort();
+}
+
+/* ── PANEL: Alignment ────────────────────────────────────────── */
+function renderAlignment(data) {
+  const body = document.getElementById('alignment-body');
+  const dateEl = document.getElementById('alignment-date');
+  if (!data || data._error || data.error) {
+    body.className = 'panel-body panel-error';
+    body.textContent = 'alignment data unavailable';
+    return;
+  }
+  const reports = data.reports || [];
+  if (!reports.length) {
+    body.className = 'panel-body empty';
+    body.innerHTML = '<div style=\"text-align:center;padding:20px\">📋<br><span style=\"color:var(--text-dim)\">first report Sunday</span></div>';
+    return;
+  }
+  const r = reports[0];
+  dateEl.textContent = r.date ? r.date.slice(0, 10) : '';
+
+  body.className = 'panel-body';
+  body.innerHTML =
+    '<div class="report-preview">' + esc(r.preview || '—') + '</div>' +
+    '<a class="report-link" href="obsidian://open?path=' +
+    encodeURIComponent(r.path || '') + '">open in obsidian ↗</a>' +
+    '<div class="report-date">' + fmtDate(r.date) + '</div>';
+}
+
+/* ── footer ──────────────────────────────────────────────────── */
+function renderFooter() {
+  document.getElementById('foot').textContent =
+    location.host + (new Date().toLocaleTimeString() ? ' · ' + new Date().toLocaleTimeString() : '');
+}
+
+/* ── lesson viewer ────────────────────────────────────────────── */
+function renderMarkdown(md) {
+  // marked (GFM tables, lists, code) + DOMPurify (XSS-safe)
+  const raw = marked.parse(md, { gfm: true, breaks: false });
+  return DOMPurify.sanitize(raw);
+}
+
+async function viewLesson(path) {
+  const modal = document.getElementById('lesson-modal');
+  const body = document.getElementById('lesson-modal-body');
+  modal.style.display = 'flex';
+  body.innerHTML = '<div class="loading">loading lesson…</div>';
+  try {
+    const resp = await fetch('/api/gyani/lesson?path=' + encodeURIComponent(path));
+    if (!resp.ok) { body.innerHTML = '<div class="panel-error">lesson not found</div>'; return; }
+    const data = await resp.json();
+    body.innerHTML = '<div class="lesson-content">' + renderMarkdown(data.content) + '</div>';
+  } catch(e) {
+    body.innerHTML = '<div class="panel-error">failed to load</div>';
+  }
+}
+function closeLesson() {
+  document.getElementById('lesson-modal').style.display = 'none';
+}
+
+/* ── PANEL: Submissions ──────────────────────────────────────── */
+const SUB_ICONS = { image: '🖼️', doc: '📄', pdf: '📕', sheet: '📊', file: '📎' };
+
+function renderSubmissions(data) {
+  const body = document.getElementById('submissions-body');
+  const count = document.getElementById('submissions-count');
+  if (!data || data._error || data.error) {
+    body.className = 'panel-body panel-error';
+    body.textContent = 'drive unavailable';
+    return;
+  }
+  const subs = data.submissions || [];
+  const link = data.folder_link;
+  count.innerHTML = (subs.length
+      ? data.unreviewed + ' awaiting review · ' + subs.length + ' total'
+      : 'empty') +
+    (link ? ` · <a href="${link}" target="_blank">open drive ↪</a>` : '');
+
+  if (!subs.length) {
+    body.className = 'panel-body empty';
+    body.innerHTML = '<div style="text-align:center;padding:16px">📤<br>' +
+      '<span style="color:var(--text-dim)">drop work in <strong>Gyani-Submissions</strong> ' +
+      'on Drive — handwritten derivations, essays, compositions</span></div>';
+    return;
+  }
+
+  body.className = 'panel-body';
+  body.innerHTML = subs.slice(0, 10).map(s => {
+    const icon = SUB_ICONS[s.kind] || SUB_ICONS.file;
+    const badge = s.reviewed
+      ? '<span class="badge done">graded</span>'
+      : '<span class="badge ready">awaiting</span>';
+    const name = s.web_link
+      ? `<a class="verif-title" href="${s.web_link}" target="_blank">${esc(s.name)}</a>`
+      : `<span class="verif-title">${esc(s.name)}</span>`;
+    return `<div class="verif-item"${s.assessment ? ` title="${esc(s.assessment)}"` : ''}>
+      <span class="lesson-icon">${icon}</span>
+      ${badge}
+      ${name}
+      <span class="verif-meta">${relDate(s.modified)}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ── PANEL: Triage / Routing Board ──────────────────────────── */
+let AGENTS = [];   // the agents tasks can be delegated to, from the database
+fetch('/api/gyani/triage/agents').then(r => r.json()).then(d => { AGENTS = d.agents || []; }).catch(() => {});
+
+function renderTriage(data, selfAssess) {
+  const body = document.getElementById('triage-body');
+  const count = document.getElementById('triage-count');
+  if (!data || data._error || data.error) {
+    body.className = 'panel-body panel-error';
+    body.textContent = 'routing board unavailable';
+    count.textContent = '';
+    return;
+  }
+  const learning = data.learning || [];
+  const delegated = data.delegated || [];
+  const untriaged = data.untriaged || [];
+
+  // Active = needs attention (gap / pending decision); settled = routine curriculum
+  const active = learning.filter(t => t.routing_state !== 'ready');
+  const settled = learning.filter(t => t.routing_state === 'ready');
+
+  count.textContent = active.length + ' active · ' + delegated.length + ' delegated'
+    + (settled.length ? ' · ' + settled.length + ' ready' : '')
+    + (untriaged.length ? ' · ' + untriaged.length + ' untriaged' : '');
+
+  let html = '';
+
+  // ── Self-awareness signal (recognition of capability gaps) ──
+  const sa = selfAssess && selfAssess.summary;
+  if (sa && sa.total_decisions > 0) {
+    html += '<div class="self-awareness">'
+      + '<span class="sa-icon">🧭</span>'
+      + '<span class="sa-label">self-awareness</span>'
+      + '<span class="sa-metric">' + sa.gaps_recognized + ' gap' + (sa.gaps_recognized === 1 ? '' : 's') + ' recognized</span>'
+      + '<span class="sa-sep">·</span>'
+      + '<span class="sa-metric">' + sa.delegated + ' delegated</span>'
+      + '<span class="sa-sep">·</span>'
+      + '<span class="sa-metric">' + sa.learn_commitments + ' learning</span>'
+      + (sa.over_delegated ? '<span class="sa-sep">·</span><span class="sa-warn">' + sa.over_delegated + ' over-delegated</span>' : '')
+      + '</div>';
+  }
+
+  // ── Your learning (active: gap + pending decision) ──
+  html += '<div class="triage-section-head"><span class="triage-dot learning-dot"></span>your learning</div>';
+  if (!active.length) {
+    html += '<div class="triage-empty">no active learning tasks</div>';
+  } else {
+    active.forEach(t => {
+      const stateBadge = t.routing_state === 'learning_gap'
+        ? '<span class="badge learning-gap">gap</span>'
+        : '<span class="badge pending">pending</span>';
+      const gapHtml = t.has_gap
+        ? '<div class="gap-tags">' + t.gap_tags.map(g => '<span class="gap-chip">' + esc(g) + '</span>').join('') + '</div>'
+        : '<div class="gap-tags"><span class="gap-chip ok">no gap — yours</span></div>';
+      const actions = t.routing_state === 'triage_pending' ? triageActionsHtml(t.task_id) : '';
+      html += '<div class="triage-item">' + stateBadge
+        + '<div class="triage-main"><div class="triage-title">' + esc(t.title) + '</div>' + gapHtml + actions + '</div>'
+        + '</div>';
+    });
+  }
+
+  // ── Delegated (agent work — zero points for the owner) ──
+  html += '<div class="triage-section-head" style="margin-top:14px"><span class="triage-dot delegated-dot"></span>delegated to agents</div>';
+  if (!delegated.length) {
+    html += '<div class="triage-empty">nothing delegated yet</div>';
+  } else {
+    delegated.forEach(t => {
+      const meta = (t.kanban_task_id ? esc(t.kanban_task_id) + ' · ' : '') + esc(t.delegation_state || 'delegated');
+      html += '<div class="triage-item delegated-item">'
+        + '<span class="badge agent">' + esc(t.assigned_to) + '</span>'
+        + '<div class="triage-main"><div class="triage-title">' + esc(t.title) + '</div>'
+        + '<div class="triage-meta">' + meta + '</div></div>'
+        + '</div>';
+    });
+  }
+
+  // ── Settled curriculum (ready — routine, see verification queue) ──
+  if (settled.length) {
+    html += '<div class="triage-section-head" style="margin-top:14px"><span class="triage-dot ready-dot"></span>settled curriculum · ' + settled.length + '</div>';
+    html += '<div class="triage-more">' + settled.length + ' ready tasks — tracked in the verification queue below</div>';
+  }
+
+  // ── Needs triage (unclassified) ──
+  if (untriaged.length) {
+    html += '<div class="triage-section-head" style="margin-top:14px"><span class="triage-dot untriaged-dot"></span>needs triage · ' + untriaged.length + '</div>';
+    untriaged.slice(0, 8).forEach(t => {
+      html += '<div class="triage-item untriaged-item">'
+        + '<span class="badge untriaged">untriaged</span>'
+        + '<div class="triage-main"><div class="triage-title">' + esc(t.title) + '</div></div>'
+        + '<button class="triage-btn triage" onclick="triageTask(' + t.task_id + ', this)">triage →</button>'
+        + '</div>';
+    });
+    if (untriaged.length > 8) {
+      html += '<div class="triage-more">+ ' + (untriaged.length - 8) + ' more</div>';
+    }
+  }
+
+  body.className = 'panel-body';
+  body.innerHTML = html;
+}
+
+function triageActionsHtml(taskId) {
+  const opts = AGENTS.map(a => '<option>' + a + '</option>').join('');
+  return '<div class="triage-actions">'
+    + '<button class="triage-btn learn" onclick="decideTask(' + taskId + ', \'learn\', null, this)">learn</button>'
+    + '<span class="delegate-group">'
+    +   '<select class="triage-agent-select" id="triage-agent-' + taskId + '">' + opts + '</select>'
+    +   '<button class="triage-btn delegate" onclick="decideTask(' + taskId + ', \'delegate\', document.getElementById(\'triage-agent-' + taskId + '\').value, this)">delegate</button>'
+    + '</span>'
+    + '</div>';
+}
+
+async function triageTask(taskId, btn) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'classifying…';
+  try {
+    await fetch('/api/gyani/triage', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({task_id: taskId}),
+    });
+  } catch (e) {
+    btn.textContent = orig;
+    btn.disabled = false;
+    alert('triage failed: ' + e.message);
+    return;
+  }
+  load();
+}
+
+async function decideTask(taskId, decision, agent, btn) {
+  btn.disabled = true;
+  const body = {task_id: taskId, decision: decision};
+  if (decision === 'delegate') body.agent = agent;
+  try {
+    const resp = await fetch('/api/gyani/triage', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      alert(decision + ' failed: ' + (d.error || d.detail || 'HTTP ' + resp.status));
+      btn.disabled = false;
+      return;
+    }
+  } catch (e) {
+    alert(decision + ' failed: ' + e.message);
+    btn.disabled = false;
+    return;
+  }
+  load();
+}
+
+/* ── PANEL: Agent Expertise ─────────────────────────────────── */
+function renderAgents(data) {
+  const body = document.getElementById('agents-body');
+  const count = document.getElementById('agents-count');
+  if (!data || data._error || data.error) {
+    body.className = 'panel-body panel-error';
+    body.textContent = 'agent expertise unavailable';
+    count.textContent = '';
+    return;
+  }
+  const agents = data.agents || [];
+  count.textContent = agents.length + ' agents';
+
+  let html = '';
+  agents.forEach(a => {
+    const configured = a.configured.length
+      ? a.configured.map(t => '<span class="exp-chip configured">' + esc(t) + '</span>').join('')
+      : '<span class="exp-chip none">no configured domain</span>';
+    const demonstrated = a.demonstrated.length
+      ? a.demonstrated.map(d => '<span class="exp-chip demonstrated" title="' + d.completed + ' completed tasks">' + esc(d.tag_name) + ' ×' + d.completed + '</span>').join('')
+      : '<span class="exp-empty">no completed work yet</span>';
+    const workload = (a.pending || a.stale || a.completed)
+      ? '<span class="agent-workload">'
+        + (a.completed ? a.completed + ' done' : '')
+        + (a.pending ? ' · ' + a.pending + ' pending' : '')
+        + (a.stale ? ' · <span class="sa-warn">' + a.stale + ' stale</span>' : '')
+        + '</span>'
+      : '';
+    html += '<div class="agent-card">'
+      + '<div class="agent-head">'
+      +   '<span class="agent-name">' + esc(a.name) + '</span>' + workload
+      + '</div>'
+      + '<div class="agent-line"><span class="agent-lbl">configured</span>' + configured + '</div>'
+      + '<div class="agent-line"><span class="agent-lbl">demonstrated</span>' + demonstrated + '</div>'
+      + '</div>';
+  });
+
+  body.className = 'panel-body';
+  body.innerHTML = html;
+}
+
+/* ── main load + render ──────────────────────────────────────── */
+async function load() {
+  const [growth, lessons, verif, habits, alignment, submissions, triage, selfAssess, agents] = await Promise.all([
+    jget('/api/growth'),
+    jget('/api/gyani/lessons'),
+    jget('/api/gyani/verifications'),
+    jget('/api/gyani/habits'),
+    jget('/api/gyani/alignment'),
+    jget('/api/gyani/submissions'),
+    jget('/api/gyani/triage/board'),
+    jget('/api/agent/self-assessment'),
+    jget('/api/agent/expertise'),
+  ]);
+
+  renderHeader(growth);
+  renderTriage(triage, selfAssess);
+  renderAgents(agents);
+  renderGrowth(growth);
+  renderLessons(lessons);
+  renderVerifications(verif);
+  renderHabits(habits);
+  renderAlignment(alignment);
+  renderSubmissions(submissions);
+  renderFooter();
+}
+
+load();
+setInterval(load, 60000);
+
+/* ── tutor chat ──────────────────────────────────────────────── */
+let tutorMode = 'tutor';
+
+async function sendTutorMessage() {
+  const input = document.getElementById('tutor-input');
+  const feed = document.getElementById('tutor-feed');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  feed.innerHTML += '<div class="tutor-msg user"><div class="tutor-bubble">' + esc(msg) + '</div></div>';
+  input.value = '';
+  feed.scrollTop = feed.scrollHeight;
+
+  feed.innerHTML += '<div class="tutor-msg gyani"><div class="tutor-bubble loading">Gyani is thinking…</div></div>';
+  feed.scrollTop = feed.scrollHeight;
+
+  try {
+    const resp = await fetch('/api/gyani/tutor', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg, mode: tutorMode}),
+    });
+    if (!resp.ok) {
+      var el = feed.lastElementChild.querySelector('.tutor-bubble');
+      el.textContent = 'Sorry, I could not reach Gyani.';
+      el.className = 'tutor-bubble error'; return;
+    }
+    var data = await resp.json();
+    var el2 = feed.lastElementChild.querySelector('.tutor-bubble');
+    el2.textContent = data.reply;
+    el2.className = 'tutor-bubble';
+  } catch(e) {
+    var el3 = feed.lastElementChild.querySelector('.tutor-bubble');
+    el3.textContent = 'Connection lost. Try again.';
+    el3.className = 'tutor-bubble error';
+  }
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function setTutorMode(mode) {
+  tutorMode = mode;
+  document.querySelectorAll('.tutor-mode-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('tutor-mode-' + mode);
+  if (btn) btn.classList.add('active');
+}
+
+document.getElementById('tutor-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTutorMessage(); }
+});
+</script>
+</body>
+</html>

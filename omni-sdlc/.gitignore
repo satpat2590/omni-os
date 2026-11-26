@@ -1,0 +1,5 @@
+# Omni SDLC toolset — git hygiene
+__pycache__/
+*.pyc
+.DS_Store
+/tmp/

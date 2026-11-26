@@ -1,0 +1,8 @@
+{
+  "name": "omni-harness-dsh",
+  "private": true,
+  "description": "Pinned install of DeepSeek Harness (developer preview) for evaluation. Install with: npm ci",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.2-rc.1"
+  }
+}

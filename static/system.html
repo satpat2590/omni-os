@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Omni system</title>
+<style>
+  :root { --bg:#050D0A; --card:#0A1712; --line:#16261F; --ink:#C6D8C8; --bright:#DCE8DC; --dim:#93AD99; --mute:#6F8A77;
+          --ok:#5DCAA5; --overdue:#EF9F27; --failed:#F09595; --waiting:#B4B2A9; --unknown:#888780; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  main { max-width:880px; margin:0 auto; padding:16px 16px 48px; }
+  h1 { font-size:20px; font-weight:500; color:var(--bright); margin:8px 0 2px; }
+  h2 { font-size:16px; font-weight:500; color:var(--bright); margin:28px 0 8px; }
+  h3 { font-size:14px; font-weight:500; color:var(--dim); margin:14px 0 4px; }
+  .sub { color:var(--mute); font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:10px 0; }
+  .counts { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 0; }
+  .pill { border:1px solid var(--line); border-radius:999px; padding:3px 10px; font-size:13px; white-space:nowrap; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:baseline; }
+  .ok { color:var(--ok); } .overdue { color:var(--overdue); } .failed { color:var(--failed); }
+  .waiting { color:var(--waiting); } .unknown { color:var(--unknown); }
+  .bg-ok { background:var(--ok); } .bg-overdue { background:var(--overdue); } .bg-failed { background:var(--failed); }
+  .bg-waiting { background:var(--waiting); } .bg-unknown { background:var(--unknown); }
+  .row { display:grid; grid-template-columns:76px 1fr; gap:2px 10px; padding:7px 0; border-top:1px solid var(--line); }
+  .row:first-of-type { border-top:0; }
+  .name { color:var(--bright); overflow-wrap:anywhere; }
+  .detail { grid-column:2; color:var(--mute); font-size:13px; overflow-wrap:anywhere; }
+  .status { font-size:13px; }
+  .diagram { overflow-x:auto; padding:6px 0; }
+  .diagram svg { max-width:none; height:auto; }
+  details > summary { cursor:pointer; color:var(--dim); font-size:14px; padding:4px 0; }
+  .err { color:var(--failed); }
+  a { color:var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Omni system</h1>
+  <div class="sub" id="meta">Loading…</div>
+  <div class="counts" id="counts"></div>
+  <div id="note" class="err"></div>
+  <div class="card" id="ready" hidden></div>
+
+  <h2>Services</h2>
+  <div class="card" id="services"></div>
+
+  <h2>Plans</h2>
+  <div id="plans"></div>
+
+  <h2>Other jobs</h2>
+  <div id="others"></div>
+
+  <h2>System map</h2>
+  <div class="card"><div class="diagram" id="sysmap"></div></div>
+</main>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict",
+                     flowchart: { useMaxWidth: false, htmlLabels: true } });
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+const ORDER = ["failed", "overdue", "unknown", "waiting", "ok"];
+let seq = 0;
+
+async function draw(target, text) {
+  try {
+    const { svg } = await mermaid.render("m" + (seq++), text);
+    target.innerHTML = svg;
+  } catch (e) {
+    target.textContent = "Diagram failed to render: " + e.message;
+    target.className = "err";
+  }
+}
+
+function statusCell(status) {
+  const cell = el("div", "status " + status);
+  cell.append(el("span", "dot bg-" + status), document.createTextNode(status));
+  return cell;
+}
+
+function jobRow(job) {
+  const row = el("div", "row");
+  row.append(statusCell(job.status), el("div", "name", job.name),
+             el("div", "detail", [job.schedule, job.detail].filter(Boolean).join(" · ")));
+  return row;
+}
+
+function renderReady(r) {
+  const box = $("ready");
+  if (!r) { box.hidden = true; return; }
+  box.hidden = false; box.replaceChildren();
+  const head = el("div", "name " + (r.ready ? "ok" : "failed"),
+                  r.ready ? "Ready: Omni is keeping its domains alive" : "Not ready to rely on yet");
+  box.append(head, el("div", "sub", r.passed + " of " + r.total + " checks pass"));
+  for (const c of r.failing.slice(0, 8)) {
+    box.append(el("div", "detail", "✗ " + c.area + " · " + c.name + ": " + c.detail));
+  }
+  if (r.failing.length > 8) box.append(el("div", "detail", "… and " + (r.failing.length - 8) + " more (omni ready)"));
+}
+
+async function load() {
+  const res = await fetch("/api/system", { credentials: "same-origin" });
+  if (!res.ok) { $("meta").textContent = "Could not load status (" + res.status + ")"; return; }
+  const data = await res.json();
+  $("meta").textContent = "Updated " + new Date(data.generated_at * 1000).toLocaleTimeString() + " · registry " + data.registry_sha;
+  $("note").textContent = data.note || "";
+  renderReady(data.readiness);
+
+  const counts = $("counts"); counts.replaceChildren();
+  for (const status of ORDER) {
+    if (!data.counts[status]) continue;
+    const pill = el("span", "pill " + status);
+    pill.append(el("span", "dot bg-" + status), document.createTextNode(data.counts[status] + " " + status));
+    counts.append(pill);
+  }
+
+  const services = $("services"); services.replaceChildren();
+  for (const s of data.services) {
+    const state = s.ok ? "ok" : "failed";
+    const row = el("div", "row");
+    const port = s.port ? " · port " + s.port + (s.port_open ? " open" : " closed") : "";
+    row.append(statusCell(state), el("div", "name", s.name), el("div", "detail", s.domain + " · " + s.state + port));
+    services.append(row);
+  }
+
+  const plans = $("plans"); plans.replaceChildren();
+  for (const plan of data.plans) {
+    const card = el("div", "card");
+    const head = el("h3", null, plan.name + " — ");
+    head.append(el("span", plan.status, plan.status));
+    const holder = el("div", "diagram");
+    card.append(head, el("div", "sub", plan.description), holder);
+    const list = el("details"); list.append(el("summary", null, "Jobs in this plan"));
+    for (const stage of plan.stages) {
+      list.append(el("h3", null, stage.name + (stage.needs.length ? "  (needs " + stage.needs.join(", ") + ")" : "")));
+      for (const job of stage.jobs) list.append(jobRow(job));
+    }
+    card.append(list);
+    plans.append(card);
+    await draw(holder, plan.mermaid);
+  }
+
+  const others = $("others"); others.replaceChildren();
+  for (const group of data.other_jobs) {
+    const bad = group.jobs.filter((j) => j.status === "failed" || j.status === "overdue").length;
+    const card = el("details", "card");
+    card.open = bad > 0;
+    card.append(el("summary", null, group.domain + " · " + group.jobs.length + " jobs" + (bad ? " · " + bad + " need attention" : "")));
+    const sorted = [...group.jobs].sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || a.name.localeCompare(b.name));
+    for (const job of sorted) card.append(jobRow(job));
+    others.append(card);
+  }
+
+  await draw($("sysmap"), data.system_mermaid);
+}
+
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

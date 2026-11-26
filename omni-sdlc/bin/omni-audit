@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""omni-audit — read-only hygiene scanner for the Omni git ecosystem.
+
+Reads repos.yaml and checks each repo's live git state against expectations.
+Never writes, commits, pushes, or deletes anything — it only inspects. Use
+--json for machine-readable output. Use --fix to actually repair (de-init stray
+.git dirs, rename master->main, add missing remotes) — that is the ONLY
+destructive path and it requires omni-sdlc/scripts/fix.sh to exist.
+
+  omni-audit                 # human-readable report
+  omni-audit --json          # machine-readable JSON
+  omni-audit --repo edoras   # audit just one repo
+"""
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+# This machine's repos.yaml (instance branch) when present, else the base example.
+REPOS_FILE = Path(os.environ.get("OMNI_SDLC_REPOS") or (
+    ROOT / "repos.yaml" if (ROOT / "repos.yaml").exists() else ROOT / "repos.example.yaml"))
+
+
+def sh(*args, cwd=None, timeout=20):
+    try:
+        r = subprocess.run(args, cwd=cwd, capture_output=True, text=True,
+                           timeout=timeout)
+        return r.returncode, (r.stdout or "").strip(), (r.stderr or "").strip()
+    except FileNotFoundError:
+        return 127, "", f"command not found: {args[0]}"
+    except subprocess.TimeoutExpired:
+        return 124, "", "timeout"
+
+
+def git(repo_dir, *args):
+    return sh("git", "-C", str(repo_dir), *args)
+
+
+def expand(p):
+    return Path(os.path.expanduser(p)).expanduser().resolve()
+
+
+def audit_repo(name, spec):
+    path = expand(spec["path"])
+    exp_remote = (spec.get("remote") or "").strip()
+    exp_base = (spec.get("base") or "").strip()
+    test_cmd = (spec.get("test") or "").strip()
+
+    row = {
+        "repo": name,
+        "path": str(path),
+        "exists": path.is_dir(),
+        "is_git": False,
+        "remote": None,
+        "remote_ok": None,
+        "base_branch": None,
+        "base_ok": None,
+        "ahead": 0,
+        "behind": 0,
+        "dirty": 0,
+        "has_gitignore": None,
+        "test_cmd": test_cmd or None,
+        "issues": [],
+        "stray_git": None,
+    }
+
+    if not path.is_dir():
+        row["issues"].append("path does not exist")
+        return row
+
+    row["has_gitignore"] = (path / ".gitignore").exists()
+    row["stray_git"] = bool((path / ".git").exists())
+
+    if (path / ".git").exists():
+        row["is_git"] = True
+        # remote
+        rc, out, err = git(path, "remote", "get-url", "origin")
+        if rc == 0:
+            row["remote"] = out
+            row["remote_ok"] = (out == exp_remote) if exp_remote else True
+            if exp_remote and out != exp_remote:
+                row["issues"].append(f"remote mismatch: '{out}' != '{exp_remote}'")
+        else:
+            row["remote_ok"] = not exp_remote
+            if exp_remote:
+                row["issues"].append(f"no origin remote (expected {exp_remote})")
+
+        # current branch
+        rc, out, err = git(path, "branch", "--show-current")
+        cur = out if rc == 0 else None
+
+        remote_base = None
+        # thunder upstream-based ahead/behind using @{u}
+        rc, out, err = git(path, "symbolic-ref", "-q", "--short",
+                           "refs/remotes/origin/"+("HEAD" if False else "HEAD"))
+        # find the default remote branch name via origin/HEAD
+        rc2, out2, _ = git(path, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
+        if rc2 == 0:
+            remote_base = out2.rsplit("/", 1)[-1]
+
+        row["base_branch"] = cur
+        if exp_base:
+            row["base_ok"] = (cur == exp_base)
+            if cur != exp_base:
+                row["issues"].append(
+                    f"on '{(cur or '?' )}' but expected base '{exp_base}'")
+            # ahead/behind vs expected base if it exists
+            rc, out, err = git(path, "rev-list", "--count",
+                               f"origin/{exp_base}..HEAD")
+            row["ahead"] = int(out) if rc == 0 else 0
+            rc, out, err = git(path, "rev-list", "--count",
+                               f"HEAD..origin/{exp_base}")
+            row["behind"] = int(out) if rc == 0 else 0
+        else:
+            row["base_ok"] = True
+
+        # dirty working tree
+        rc, out, _ = git(path, "status", "--porcelain")
+        dirty = len([l for l in out.splitlines() if l.strip()]) if rc == 0 else 0
+        row["dirty"] = dirty
+
+        if dirty > 0:
+            row["issues"].append(f"{dirty} uncommitted/unpushed file(s)")
+        if row["ahead"] > 0:
+            row["issues"].append(f"{row['ahead']} commit(s) ahead of origin — not pushed")
+        if not row["has_gitignore"]:
+            row["issues"].append("missing .gitignore")
+    else:
+        row["issues"].append("not a git repo (no .git — may need de-init or init)")
+
+    return row
+
+
+def main():
+    args = [a for a in sys.argv[1:]]
+    want_json = "--json" in args
+    want_fix = "--fix" in args
+    only = None
+    # --repo NAME
+    for i, a in enumerate(args):
+        if a == "--repo" and i + 1 < len(args):
+            only = args[i + 1]
+
+    if not REPOS_FILE.exists():
+        print(f"missing {REPOS_FILE}", file=sys.stderr)
+        return 2
+
+    data = yaml.safe_load(REPOS_FILE.read_text())
+    repos = data["repos"]
+
+    results = {}
+    for name, spec in repos.items():
+        if only and name != only:
+            continue
+        results[name] = audit_repo(name, spec)
+
+    if want_json:
+        print(json.dumps(results, indent=2))
+        return 0
+
+    # human report
+    ok, warn = 0, 0
+    print(f"{'REPO':<14} {'BASE':<10} {'↕a/b':<7} {'DIRTY':<6} {'REMOTE':<6} ISSUES")
+    print("-" * 88)
+    for name, r in sorted(results.items()):
+        base = r["base_branch"] or "-"
+        drift = f"{r['ahead']}/{r['behind']}"
+        remote = "ok" if r["remote_ok"] else ("none" if not r["remote"] else "MISMATCH")
+        dirty = str(r["dirty"])
+        issues = "; ".join(r["issues"]) or "clean"
+        verdict = "✓" if not r["issues"] else "!"
+        if not r["issues"]:
+            ok += 1
+        else:
+            warn += 1
+        print(f"{name:<14} {base:<10} {drift:<7} {dirty:<6} {remote:<6} {verdict} {issues}")
+
+    # stray .git dirs
+    print("\n--- stray .git dirs ---")
+    for sp in data.get("stray_git", []):
+        p = expand(sp)
+        if (p / ".git").exists():
+            print(f"! {sp}: stray .git present (should be de-inited)")
+        else:
+            print(f". {sp}: ok")
+
+    print(f"\nVERDICT: {ok} clean, {warn} need attention "
+          f"({len(repos)} repos)")
+
+    if want_fix:
+        print("\n--fix requested. Run omni-sdlc/fix.sh (see README) — omni-audit "
+              "itself never modifies state.")
+
+    return 1 if warn else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# omni-branch — draw an agent's work branch off a repo's base, in a LINKED WORKTREE.
+#
+# Usage:
+#   omni-branch <repo> <agent> <slug> [--push] [--dir <path>] [--base <ref>]
+#     -> creates branch agent/<agent>/<slug> off origin/<base> and checks it out in
+#        <repo>/.worktrees/<agent>-<slug> (a linked git worktree). <base> is the
+#        repo's `base` in repos.yaml (matched by path), else main; --base overrides.
+#   omni-branch <repo> <agent> <slug> --push
+#     -> also push the branch to origin and set upstream
+#
+# Examples:
+#   omni-branch edoras argus fix-exit-overlay
+#   omni-branch omni paisa mindmap-layout --push
+#
+# Convention: work NEVER happens directly on main, and NEVER in the repo's live
+# working tree. Every change rides an agent-owned branch committed from a linked
+# worktree and enters main only through the merge lane (omni-merge-lane).
+#
+# Why a worktree: the live tree must stay on main. Edoras' pre-commit guard refuses
+# agent commits in the live working tree and audits each attempt (refused=1, an S2
+# alarm); a linked-worktree commit is permitted and audited tree=worktree refused=0.
+# Moving the live tree's HEAD onto an agent branch — what this tool used to do — is
+# exactly what put agents in the wrong tree.
+set -euo pipefail
+
+AGENT=""
+SLUG=""
+PUSH=""
+WT_OVERRIDE=""
+BASE_REF=""
+SDLC_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# This machine's repos.yaml (instance branch) when present, else the base example.
+if [ -f "$SDLC_ROOT/repos.yaml" ]; then DEFAULT_REPOS="$SDLC_ROOT/repos.yaml"; else DEFAULT_REPOS="$SDLC_ROOT/repos.example.yaml"; fi
+REPOS_FILE="${OMNI_SDLC_REPOS:-$DEFAULT_REPOS}"
+# Omni's own interpreter: core/.venv has PyYAML, which a machine's python3 may not.
+PY="${OMNI_PYTHON:-$(cd "$SDLC_ROOT/.." && pwd)/core/.venv/bin/python}"; [ -x "$PY" ] || PY=python3
+
+POS=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --push)   PUSH="--push" ;;
+    --dir)    WT_OVERRIDE="${2:-}"; shift ;;
+    --dir=*)  WT_OVERRIDE="${1#--dir=}" ;;
+    --base)   BASE_REF="${2:-}"; shift ;;
+    --base=*) BASE_REF="${1#--base=}" ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "ERROR: unknown option: $1" >&2; exit 2 ;;
+    *) POS+=("$1") ;;
+  esac
+  shift
+done
+
+REPO_DIR="${POS[0]:-}"
+AGENT="${POS[1]:-}"
+SLUG="${POS[2]:-}"
+
+if [ -z "$REPO_DIR" ] || [ -z "$AGENT" ] || [ -z "$SLUG" ]; then
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' | grep -v '^$'
+  echo "ERROR: need <repo> <agent> <slug>" >&2
+  exit 2
+fi
+
+REPO="${REPO_DIR}"
+case "$REPO" in
+  /*) : ;;  # already absolute
+  *)  REPO="${HOME}/${REPO_DIR}" ;;  # treat as ~-relative name
+esac
+REPO="$(cd "$REPO" 2>/dev/null && pwd || echo "$REPO")"
+if ! git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "ERROR: not a git repo: $REPO" >&2
+  exit 2
+fi
+# The common git dir holds shared state (info/exclude). Resolving it this way also
+# works when $REPO is itself a linked worktree, where .git is a file.
+COMMON_DIR="$(cd "$REPO" && cd "$(git rev-parse --git-common-dir)" && pwd)"
+TOPLEVEL="$(git -C "$REPO" rev-parse --show-toplevel)"
+
+# sanitize agent + slug: lowercase, dashes, alphanumeric
+clean() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//'; }
+SLUG="$(clean "$SLUG")"
+AGENT_CLEAN="$(clean "$AGENT")"
+if [ -z "$SLUG" ]; then
+  echo "ERROR: slug sanitized to nothing" >&2
+  exit 2
+fi
+if [ -z "$AGENT_CLEAN" ]; then
+  echo "ERROR: agent name sanitized to nothing" >&2
+  exit 2
+fi
+
+BRANCH="agent/${AGENT_CLEAN}/${SLUG}"
+
+# Default base: the repos.yaml entry whose path is this repo, else main. ~/omni's
+# base is its instance branch, so its agent work must not be drawn off main.
+if [ -z "$BASE_REF" ]; then
+  YAML_BASE="$("$PY" - "$REPOS_FILE" "$TOPLEVEL" <<'PY' 2>/dev/null || true
+import os, sys, yaml
+repos_file, top = sys.argv[1], os.path.realpath(sys.argv[2])
+for spec in (yaml.safe_load(open(repos_file)) or {}).get("repos", {}).values():
+    if os.path.realpath(os.path.expanduser(spec.get("path", ""))) == top:
+        print((spec.get("base") or "").strip())
+        break
+PY
+)"
+  BASE_REF="origin/${YAML_BASE:-main}"
+fi
+
+# Deterministic base: whatever origin/<base> points at, freshly fetched.
+BASE_BRANCH="${BASE_REF#origin/}"
+git -C "$TOPLEVEL" fetch origin "$BASE_BRANCH" >/dev/null 2>&1 || true
+BASE_HEAD="$(git -C "$TOPLEVEL" rev-parse "$BASE_REF" 2>/dev/null || echo '')"
+if [ -z "$BASE_HEAD" ]; then
+  echo "ERROR: $BASE_REF not resolvable — is this repo pushed yet?" >&2
+  exit 2
+fi
+
+# Worktree location: inside the repo's own .worktrees/ (same filesystem, native git
+# bookkeeping, picked up by `git worktree list` / `worktree-reap`).
+WT="${WT_OVERRIDE:-$TOPLEVEL/.worktrees/${AGENT_CLEAN}-${SLUG}}"
+case "$WT" in /*) : ;; *) WT="$TOPLEVEL/$WT" ;; esac
+
+# Never hand out the live tree's own checkout.
+LIVE_BRANCH="$(git -C "$TOPLEVEL" symbolic-ref --short -q HEAD 2>/dev/null || echo '')"
+if [ "$LIVE_BRANCH" = "$BRANCH" ]; then
+  echo "ERROR: '$BRANCH' is checked out in the live working tree ($TOPLEVEL)." >&2
+  echo "       Put the live tree back on its base: git -C $TOPLEVEL checkout ${BASE_REF#origin/}" >&2
+  exit 2
+fi
+
+# An untracked .worktrees/ dir would block the merge lane's clean-tree precheck
+# ("main working tree has uncommitted changes") without any real dirt. Keep it out
+# of `git status` via the repo-local exclude — no tracked change required.
+if ! git -C "$TOPLEVEL" check-ignore -q ".worktrees/__probe__" 2>/dev/null; then
+  mkdir -p "$COMMON_DIR/info"
+  printf '\n# linked agent worktrees (omni-branch) — must never dirty the live tree\n.worktrees/\n' \
+    >> "$COMMON_DIR/info/exclude"
+fi
+
+# Re-entry is normal (an agent resumes its card and re-runs omni-branch): reuse the
+# existing worktree for this branch rather than failing.
+EXISTING_WT=""
+CUR_WT=""
+while IFS= read -r line; do
+  case "$line" in
+    "worktree "*) CUR_WT="${line#worktree }" ;;
+    "branch refs/heads/$BRANCH") EXISTING_WT="$CUR_WT" ;;
+  esac
+done < <(git -C "$TOPLEVEL" worktree list --porcelain)
+
+if [ -n "$EXISTING_WT" ]; then
+  WT="$EXISTING_WT"
+  echo "EXISTS: branch '$BRANCH' already has a worktree; reusing it."
+elif git -C "$TOPLEVEL" rev-parse --verify --quiet "refs/heads/$BRANCH" >/dev/null 2>&1; then
+  if [ -e "$WT" ]; then
+    echo "ERROR: path exists but is not a worktree of '$BRANCH': $WT" >&2
+    exit 2
+  fi
+  git -C "$TOPLEVEL" worktree add "$WT" "$BRANCH"
+  echo "EXISTS: branch '$BRANCH' already present; checked out in a linked worktree."
+elif git -C "$TOPLEVEL" rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
+  if [ -e "$WT" ]; then
+    echo "ERROR: path exists but is not a worktree of '$BRANCH': $WT" >&2
+    exit 2
+  fi
+  git -C "$TOPLEVEL" worktree add --no-track -b "$BRANCH" "$WT" "origin/$BRANCH"
+  echo "ADOPTED branch '$BRANCH' from origin/$BRANCH into a linked worktree."
+else
+  if [ -e "$WT" ]; then
+    echo "ERROR: path already exists: $WT" >&2
+    echo "       remove it (worktree-reap) or pass --dir <path>." >&2
+    exit 2
+  fi
+  git -C "$TOPLEVEL" worktree add --no-track -b "$BRANCH" "$WT" "$BASE_HEAD"
+  echo "CREATED branch '$BRANCH' from $BASE_REF ($(echo "$BASE_HEAD" | cut -c1-8)) in a linked worktree"
+fi
+
+if [ "$PUSH" = "--push" ]; then
+  git -C "$WT" push -u origin "$BRANCH"
+  echo "PUSHED '$BRANCH' -> origin (upstream set)."
+fi
+
+# The lane cannot merge while the live tree is dirty; warn now, not after the gate.
+if [ -n "$(git -C "$TOPLEVEL" status --porcelain)" ]; then
+  echo "NOTE: live tree $TOPLEVEL is dirty — omni-merge-lane will refuse to merge"
+  echo "      until ${BASE_REF#origin/} is clean (your branch worktree is unaffected)."
+fi
+
+echo "WORKTREE: $WT"
+echo "Now work here (never in $TOPLEVEL):"
+echo "  cd $WT"
+echo "  # edit, commit, push"
+echo "  omni-merge-lane $REPO_DIR $BRANCH"

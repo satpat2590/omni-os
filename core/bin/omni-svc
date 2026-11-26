@@ -1,0 +1,15 @@
+#!/bin/bash
+# omni-svc COMMAND [ARGS...]: run COMMAND with this machine's Omni secrets in its environment.
+#
+# Every KEY=value file in $OMNI_ENV_DIR (default ~/.config/omni/*.env) is sourced with `set -a`, so
+# one value may refer to another ("ATMA_DATABASE_URL=${DATABASE_URL}") and a secret is written once.
+# launchd jobs and services run through this, never with secrets in their plists. Keep the files
+# mode 600, and outside any git repo.
+set -euo pipefail
+dir="${OMNI_ENV_DIR:-$HOME/.config/omni}"
+set -a
+for f in "$dir"/*.env; do
+    [ -f "$f" ] && . "$f"
+done
+set +a
+exec "$@"

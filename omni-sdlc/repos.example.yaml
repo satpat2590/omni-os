@@ -1,0 +1,26 @@
+# Omni SDLC — repository inventory (base example)
+#
+# A fresh Omni OS checkout has one repo: Omni itself. A machine lists its own repos (its domains)
+# in `repos.yaml` on its instance branch, and the tools read that instead when it exists.
+#
+# Fields:
+#   path        — absolute-ish path under $HOME (tilde expands at runtime)
+#   remote      — expected github remote URL ('' = no remote expected)
+#   base        — the branch the merge lane merges into and omni-branch draws from (main if unset)
+#   test        — command run in the merge lane to verify a change ('' = none)
+#   test_env    — env vars the test cmd needs; "{root}" expands to the checkout under test
+#   note        — human description
+
+repos:
+  omni:
+    path: "~/omni"
+    remote: ""
+    base: "main"
+    test: "cd core && .venv/bin/python -m pytest -q"
+    note: "Omni OS: core, Atma, SDLC tooling"
+
+policy:
+  test_gate: true
+  require_push: true
+  reconcile_on_conflict: true
+  tag_on_merge: true

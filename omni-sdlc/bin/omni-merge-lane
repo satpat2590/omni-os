@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+"""omni-merge-lane — the gatekeeper that polices merges into a repo's base branch.
+
+This is the "relevant process" that makes Omni's SDLC actually work. It takes
+an agent-owned branch that MUST already be pushed (see omni-branch) and walks
+it through a gated merge into the repo's base branch — `base` in repos.yaml,
+`main` when unset (~/omni's base is its instance branch, not main):
+
+  1. SIMON (checkout)  — sync repo, fetch origin, resolve origin/<base>
+  2. SAFETY            — refuse if branch is the base, not pushed, or behind origin
+  3. TEST GATE         — run the repo's declared test cmd (repos.yaml policy)
+                         in a throwaway detached worktree of the branch
+  4. MERGE             — attempt a no-ff merge of branch into the base, in the
+                         live tree, which must already be on the base and clean
+  5. CONFLICT          — on conflict, abort and hands off to the merge-reconciler
+                         (spawn a neutral third agent), then stop — never
+                         self-adjudicate.
+  6. TAG + FINISH      — create annotated tag, report the resulting base HEAD.
+
+It NEVER creates new commits of its own, never rewrites history (no ff rebase),
+never merges a branch that conflicts without an external reconciler, and never
+moves the live tree's HEAD: services run from the live tree, so a lane that
+checked branches out there could leave them running the wrong code.
+
+Usage:
+  omni-merge-lane <repo> <branch>
+    e.g. omni-merge-lane omni agent/dev/fix-something
+  omni-merge-lane <repo> <branch> --dry-run   # describe, change nothing
+"""
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+# This machine's repos.yaml (instance branch) when present, else the base example.
+REPOS_FILE = Path(os.environ.get("OMNI_SDLC_REPOS") or (
+    ROOT / "repos.yaml" if (ROOT / "repos.yaml").exists() else ROOT / "repos.example.yaml"))
+
+
+def sh(args, cwd=None, check=False, timeout=600):
+    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True,
+                       timeout=timeout)
+    if check and r.returncode != 0:
+        raise RuntimeError(f"{args[0]} exit {r.returncode}: {r.stderr.strip()}")
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+def git(repo, *args, check=False):
+    return sh(["git", "-C", str(repo), *args], check=check)
+
+
+def gate_env(root, spec):
+    """Environment for the test gate, pinned to the checkout under test.
+
+    A repo's test cmd usually runs a venv console script whose editable install
+    points at the LIVE tree (Edoras: `.venv/.../__editable__.pth ->
+    the live tree's src`). Run that from a branch worktree unqualified and the suite
+    silently imports `main`'s code — a false green. So the checkout under test
+    always leads sys.path, and `test_env` in repos.yaml pins whatever else the
+    harness uses to resolve its root (`{root}` expands to that checkout).
+    """
+    env = os.environ.copy()
+    src = Path(root) / "src"
+    if src.is_dir():
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(src) + (os.pathsep + existing if existing else "")
+    for k, v in (spec.get("test_env") or {}).items():
+        env[str(k)] = str(v).replace("{root}", str(root))
+    return env
+
+
+def load_repos():
+    if not REPOS_FILE.exists():
+        print(f"missing {REPOS_FILE}", file=sys.stderr)
+        sys.exit(2)
+    return yaml.safe_load(REPOS_FILE.read_text())
+
+
+def find_repo(data, name):
+    for n, spec in data["repos"].items():
+        if n == name:
+            return n, spec
+    print(f"repo '{name}' not in repos.yaml", file=sys.stderr)
+    sys.exit(2)
+
+
+def main():
+    dry = "--dry-run" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(args) < 2:
+        print(__doc__)
+        return 2
+
+    repo_name = args[0]
+    branch = args[1]
+    data = load_repos()
+    name, spec = find_repo(data, repo_name)
+    repo_dir = Path(os.path.expanduser(spec["path"])).resolve()
+    base = (spec.get("base") or "").strip() or "main"
+    policy = data.get("policy", {})
+
+    if not (repo_dir / ".git").exists():
+        print(f"ERROR: not a git repo: {repo_dir}", file=sys.stderr)
+        return 2
+
+    print(f"== omni-merge-lane: {name} <- {branch}" + ("  [DRY-RUN]" if dry else ""))
+    print(f"   repo : {repo_dir}")
+    print(f"   base : {base}")
+
+    if branch == base:
+        print(f"ERROR: refusing to merge {base} into itself.", file=sys.stderr)
+        return 2
+
+    # --- 0. sync + fetch ---
+    git(repo_dir, "fetch", "origin")
+    rc, cur_base, _ = git(repo_dir, "rev-parse", f"origin/{base}")
+    if rc != 0:
+        print(f"ERROR: origin/{base} not resolvable (repo not pushed?).", file=sys.stderr)
+        return 2
+
+    # --- 1. verify branch exists, named agent/*, is pushed & not behind ---
+    if not branch.startswith("agent/"):
+        print(f"WARN: branch '{branch}' does not follow agent/<agent>/<slug> "
+              f"convention — proceeding anyway (or use omni-branch next time).")
+    rc, _, _ = git(repo_dir, "rev-parse", "--verify", "--quiet", branch)
+    if rc != 0:
+        print(f"ERROR: branch '{branch}' does not exist locally.", file=sys.stderr)
+        return 2
+    rc, _, _ = git(repo_dir, "rev-parse", "--verify", "--quiet",
+                   f"origin/{branch}")
+    if rc != 0:
+        print(f"ERROR: '{branch}' not pushed to origin. Push first "
+              f"(omni-branch {repo_name} <agent> <slug> --push).", file=sys.stderr)
+        return 2
+    # compare branch vs origin/branch
+    rc, local, _ = git(repo_dir, "rev-parse", branch)
+    rc2, remote, _ = git(repo_dir, "rev-parse", f"origin/{branch}")
+    if local != remote:
+        print(f"ERROR: local '{branch}' ({local[:8]}) differs from "
+              f"origin/{branch} ({remote[:8]}). Push first.", file=sys.stderr)
+        return 2
+
+    # --- 2. TEST GATE (unless repo declares no test) ---
+    test_cmd = (spec.get("test") or "").strip()
+    if policy.get("test_gate", True) and test_cmd:
+        print(f"-- TEST GATE: running '{test_cmd}' on {branch} ...")
+        if dry:
+            print("   [DRY-RUN: skipped]")
+        else:
+            # Gate on the BRANCH's real content, always in a throwaway detached
+            # worktree. Never check the branch out in the live tree: services run
+            # from it, and a failed gate used to return with the live tree left on
+            # the agent branch. Never fall through to running the gate against
+            # whatever the live tree holds either — that is a silent false green
+            # (the gate would test the base, not the fix).
+            gate_wt = str(repo_dir / ".worktrees" / f"lane-gate-{os.getpid()}")
+            print(f"   gating in a detached worktree ({gate_wt}).")
+            rc_wt, _, wt_err = git(repo_dir, "worktree", "add", "--detach",
+                                   gate_wt, branch)
+            if rc_wt != 0:
+                print(f"ERROR: could not prepare the gate worktree at "
+                      f"{gate_wt}: {wt_err}", file=sys.stderr)
+                return 2
+            try:
+                r = subprocess.run(["/bin/bash", "-lc", test_cmd], cwd=gate_wt,
+                                   capture_output=True, text=True, timeout=900,
+                                   env=gate_env(gate_wt, spec))
+            finally:
+                git(repo_dir, "worktree", "remove", "--force", gate_wt)
+            if r.returncode != 0:
+                print("TEST GATE FAILED:", file=sys.stderr)
+                print((r.stdout + r.stderr).strip(), file=sys.stderr)
+                return 1
+            print(f"   test gate passed (exit 0).")
+    else:
+        print("-- TEST GATE: none declared for this repo, skipping.")
+
+    # The merge happens in the live tree, so it must already be on the base and
+    # clean. Refuse rather than switch it: the lane never moves the live HEAD.
+    rc_lb, live_branch, _ = git(repo_dir, "symbolic-ref", "--short", "-q", "HEAD")
+    if rc_lb != 0 or live_branch != base:
+        print(f"ERROR: live tree {repo_dir} is on "
+              f"'{live_branch if rc_lb == 0 else 'a detached HEAD'}', not the base "
+              f"'{base}'. The lane does not switch it; fix repos.yaml `base` or "
+              f"put the live tree back on {base} yourself.", file=sys.stderr)
+        return 2
+    rc, dirty, _ = git(repo_dir, "status", "--porcelain")
+    # `.worktrees/` is bookkeeping for agent checkouts, not dirt on the base:
+    # ignore untracked entries under it (a left-over one used to block this precheck).
+    dirty_lines = [ln for ln in dirty.splitlines()
+                   if ln.strip() and not ln.startswith("?? .worktrees/")]
+    if rc == 0 and dirty_lines:
+        print(f"ERROR: {base} working tree has uncommitted changes. Commit "
+              f"them before merging (keep {base} sacred).", file=sys.stderr)
+        for ln in dirty_lines[:10]:
+            print(f"   {ln}", file=sys.stderr)
+        if len(dirty_lines) > 10:
+            print(f"   ... and {len(dirty_lines) - 10} more", file=sys.stderr)
+        return 2
+
+    # --- 3. MERGE (no-fast-forward so the merge is a real, reviewable commit) ---
+    print(f"-- MERGING {branch} into {base} ...")
+    if dry:
+        print("   [DRY-RUN: would merge --no-ff]")
+        return 0
+
+    rc, out, err = git(repo_dir, "merge", "--no-ff", "-m",
+                       f"merge: {name} <- {branch} [omni-merge-lane]", branch)
+    if rc != 0:
+        # --- 4. CONFLICT -> hand off to reconciler, never self-adjudicate ---
+        print("MERGE CONFLICT.", file=sys.stderr)
+        print(f"Aborting to keep {base} clean. Hand off to the merge-reconciler:", file=sys.stderr)
+        print(f"  repo: {repo_dir}", file=sys.stderr)
+        print(f"  branch A (into): {base} (HEAD={cur_base[:8]})", file=sys.stderr)
+        print(f"  branch B (from): {branch}", file=sys.stderr)
+        git(repo_dir, "merge", "--abort")
+        print("\nResolution is a THIRD-PARTY task (never the branch's own agent). "
+              "Spawn the neutral merge-reconciler skill against this repo, then "
+              "re-run omni-merge-lane once resolved & pushed.", file=sys.stderr)
+        return 1
+
+    # --- 5. TAG + report ---
+    tag = f"merge-{name}-{branch.replace('/', '-')}"
+    with open(os.devnull, "w") as dn:
+        tr = subprocess.run(["git", "-C", str(repo_dir), "tag", tag],
+                            stdout=dn, stderr=dn)
+    if tr.returncode != 0:
+        print(f"WARN: could not tag '{tag}' (may already exist).")
+    else:
+        print(f"-- tagged '{tag}'.")
+    rc, head, _ = git(repo_dir, "rev-parse", "HEAD")
+    print(f"-- DONE. {base} now at {head[:8]}")
+    print(f"-- Push {base}?  git -C {repo_dir} push origin {base}  (gatekeeper "
+          f"does not auto-push {base}; push once {name}'s integrating process "
+          f"confirms.)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

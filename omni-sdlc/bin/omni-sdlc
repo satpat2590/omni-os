@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# omni-sdlc — top-level entry point for the Omni SDLC toolset.
+#
+#   omni-sdlc audit                 # read-only hygiene report (recommended first)
+#   omni-sdlc branch <repo> <agent> <slug> [--push]
+#   omni-sdlc merge <repo> <agent>/<slug> [--dry-run]
+#
+set -euo pipefail
+
+# Resolve this script through symlinks so it can be installed on PATH (e.g.
+# ~/.local/bin/omni-sdlc -> ~/omni/omni-sdlc/bin/omni-sdlc) without breaking the
+# lookups below.
+SELF="$0"
+while [ -L "$SELF" ]; do
+  _dir="$(cd "$(dirname "$SELF")" && pwd)"
+  SELF="$(readlink "$SELF")"
+  case "$SELF" in /*) : ;; *) SELF="$_dir/$SELF" ;; esac
+done
+BIN="$(cd "$(dirname "$SELF")" && pwd)"
+# Omni's own interpreter: core/.venv has PyYAML, which a machine's python3 may not.
+PY="${OMNI_PYTHON:-$(cd "$BIN/../.." && pwd)/core/.venv/bin/python}"; [ -x "$PY" ] || PY=python3
+
+case "${1:-}" in
+  audit)
+    shift
+    exec "$PY" "$BIN/omni-audit" "$@"
+    ;;
+  branch)
+    shift
+    exec bash "$BIN/omni-branch" "$@"
+    ;;
+  merge)
+    shift
+    exec "$PY" "$BIN/omni-merge-lane" "$@"
+    ;;
+  "")
+    sed -n '1,12p' "$0" | grep -E '^#' | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+  *)
+    echo "unknown command: ${1}" >&2
+    echo "usage: omni-sdlc {audit|branch|merge}" >&2
+    exit 2
+    ;;
+esac

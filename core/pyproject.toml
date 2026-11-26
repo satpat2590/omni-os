@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omni-core"
+version = "0.1.0"
+description = "Omni core: the registry, runner and run ledger above every harness"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0",
+    "psycopg2-binary>=2.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+omni = "omni_core.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["omni_core*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

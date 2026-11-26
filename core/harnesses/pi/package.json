@@ -1,0 +1,8 @@
+{
+  "name": "omni-harness-pi",
+  "private": true,
+  "description": "Pinned install of the Pi coding agent for Omni. Install with: npm ci",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.2"
+  }
+}

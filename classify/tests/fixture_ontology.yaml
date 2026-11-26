@@ -1,0 +1,99 @@
+# Omni ontology — the canonical six realms + bound agents.
+#
+# This is the single source of truth for "where does something lie in Omni terms".
+# It is CONFIG-DRIVEN: add a realm or an agent here and the classifier widens its
+# label space with zero code change. Consumed by omni_classifier.py.
+#
+#   realms.<name>.meaning     — one/two-word semantic meaning (used in Jev prompts)
+#   realms.<name>.description — what activities/concerns fall in this realm
+#   realms.<name>.keywords    — deterministic keyword floor (keyword_classify)
+#   realms.<name>.agents      — bound agents (also declared under `agents`)
+#   agents.<name>.realm/.role — agent identity + responsibility
+
+version: 1
+
+realms:
+  edoras:
+    meaning: "financial"
+    tongue: "Tolkien"
+    repo: "~/edoras"
+    description: >
+      Trading and finance: portfolio management, strategy research, risk,
+      backtesting, execution, NAV, positions, signals, accounting.
+    keywords: [trading, trade, portfolio, strategy, risk, nav, rebalance, backtest,
+               signal, crypto, equity, position, pnl, radagast, galadriel, elrond, accounting]
+    agents: [argus, paisa, logistis]
+
+  atma:
+    meaning: "the self / growth"
+    tongue: "आत्मन्"
+    repo: "~/atma"
+    description: >
+      The meta-realm of growth: tasks, verification, learning, skill trees,
+      points, curriculum, personal growth across all realms.
+    keywords: [task, growth, verify, verification, points, learning, curriculum,
+               skill, goal, streak, atma, canary]
+    agents: [gyani]
+
+  soma:
+    meaning: "the body"
+    tongue: "σῶμα"
+    repo: "~/whoop-sync"
+    description: >
+      The body: WHOOP biometrics, workouts, sleep, recovery, HRV, strain,
+      physical health and training.
+    keywords: [whoop, workout, sleep, recovery, hrv, strain, body, health,
+               training, heart, run, lift]
+    agents: []
+
+  raga:
+    meaning: "sound × emotion × body"
+    tongue: "राग"
+    repo: "~/whoop-sync"
+    description: >
+      Music and listening: Spotify accumulation, playlists, tracks, sound,
+      emotion.
+    keywords: [spotify, music, listening, playlist, track, song, sound, audio, raga]
+    agents: []
+
+  smriti:
+    meaning: "memory"
+    tongue: "स्मृति"
+    repo: "~/veltiosi"
+    description: >
+      Memory and knowledge: the Obsidian vault, notes, the knowledge graph,
+      what is remembered.
+    keywords: [memory, vault, obsidian, note, notes, knowledge, veltiosi, wiki,
+               recall, note-taking]
+    agents: [veltiosi]
+
+  omni:
+    meaning: "the glue"
+    tongue: "ὅμος"
+    repo: "~/omni"
+    description: >
+      The meta-realm: dashboards, monitoring, orchestration, agent
+      coordination, system health, infrastructure, collectors.
+    keywords: [dashboard, monitor, cron, agent, orchestration, system, infra,
+               collector, mindmap, kingdom, gateway]
+    agents: [satya]
+
+agents:
+  argus:
+    realm: edoras
+    role: "trader — executes trades and manages positions (execution only, no research)"
+  paisa:
+    realm: edoras
+    role: "researcher — portfolio optimization, allocation and rebalance decisions, quant + risk"
+  logistis:
+    realm: edoras
+    role: "accountant — records and reconciles trades in the ledger (bookkeeping, source of truth)"
+  gyani:
+    realm: atma
+    role: "bridge agent — curriculum, learning, verification"
+  veltiosi:
+    realm: smriti
+    role: "knowledge keeper — vault maintenance, note linking"
+  satya:
+    realm: omni
+    role: "the glue — meta-realm coordination, research, philosophy"

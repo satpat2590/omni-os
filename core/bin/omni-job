@@ -1,0 +1,27 @@
+#!/bin/bash
+# omni-job JOB [-- COMMAND...]: run a scheduled job through `omni run`.
+#
+# launchd runs this (after omni-svc has loaded the secrets). If Omni itself cannot start (its
+# venv or code is broken, or the registry no longer loads), COMMAND, the job's own command line,
+# is run directly instead, so a broken platform never stops a feed. That fallback is announced
+# in the job's log. A job without COMMAND (an agent job) has no fallback: it fails instead.
+job="$1"; shift
+[ -n "$job" ] || { echo "usage: omni-job JOB [-- COMMAND...]" >&2; exit 64; }
+[ "$1" = "--" ] && shift
+core="$HOME/omni/core"
+py="$core/.venv/bin/python"
+
+fallback() {
+    if [ "$#" -gt 0 ]; then
+        echo "omni-job: $job: omni cannot start ($reason); running the job directly, unrecorded" >&2
+        exec "$@"
+    fi
+    echo "omni-job: $job: omni cannot start ($reason) and the job has no direct command" >&2
+    exit 78
+}
+
+if ! reason=$( { cd "$core" && "$py" -I -c 'import omni_core.cli, omni_core.registry as r; r.load()'; } 2>&1); then
+    reason="${reason##*$'\n'}"
+    fallback "$@"
+fi
+cd "$core" && exec "$py" -m omni_core.cli run "$job"
