@@ -11,7 +11,7 @@ instance, and a change only moves on after its tests pass there.
  macOS user `omnidev`   ──push──▶  /Users/Shared/omni-os.git  ──pull──▶  user `omni`, ~/omni
  ~/omni on main                    (main)                               branch instance/<name>
                                        │
-                                       └──▶ public Omni OS repo (published by the operator only)
+                                       └──▶ github.com/satpat2590/omni-os (published by the operator only)
 ```
 
 1. **Testing ground (`omnidev`).** This is a separate macOS user with its own checkout of `main`,
@@ -20,8 +20,13 @@ instance, and a change only moves on after its tests pass there.
    the system Python) is exactly what a new user would have.
 2. **Shared base repo.** This is a bare repo that both users can write to (group `staff`). The
    testing ground pushes `main` here. It needs no GitHub credentials.
-3. **Live instance (`omni`).** This user pulls `main` from the shared repo, runs the tests again,
-   publishes `main`, and merges it into its instance branch. Only the operator account publishes.
+3. **Live instance (`omni`).** This user pulls `main` from the shared repo into its `public-main`
+   worktree, runs the tests again, pushes it to the public repo, and merges it into its instance
+   branch. Only the operator account publishes.
+
+The public repo's history starts at its first release. The shared repo and the testing ground use
+that history, and the instance branch has it merged in, so every later change is an ordinary
+fast-forward or merge.
 
 Changes flow one way: from the testing ground into `main`, and from `main` into each instance.
 Nothing moves from an instance back into `main`.
@@ -73,6 +78,9 @@ bash omni-sdlc/tests/test_omni_branch.sh && bash omni-sdlc/tests/test_omni_merge
 git commit -am "…" && git push origin main
 
 # as the operator (omni)
-cd ~/worktrees/omni-base && git pull --ff-only base main     # retest here, then publish
-cd ~/omni && git merge main                                  # into instance/<name>; retest
+cd ~/worktrees/omni-base                                     # branch public-main
+git pull --ff-only base main                                 # what the testing ground pushed
+(cd core && .venv/bin/python -m pytest -q)                   # retest, then publish:
+git push public public-main:main
+cd ~/omni && git merge public-main                           # into instance/<name>; retest
 ```
