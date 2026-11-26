@@ -56,6 +56,12 @@ def normalized(text):
 
 
 def resolve_tag(cur, category, path):
+    # A seed label can move. Keep routing to it if its name still identifies one tag.
+    if len(path) == 1:
+        cur.execute("SELECT id,name FROM tags WHERE category=%s", (category,))
+        exact = [r["id"] for r in cur.fetchall() if normalized(r["name"]) == normalized(path[0])]
+        if len(exact) == 1:
+            return exact[0]
     parent = None
     for name in path:
         cur.execute("SELECT id,name FROM tags WHERE category=%s AND parent_tag_id IS NOT DISTINCT FROM %s ORDER BY id", (category, parent))

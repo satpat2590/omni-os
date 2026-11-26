@@ -34,6 +34,7 @@ def test_title_only_concurrent_creation_and_reparent(owner, clean_db):
     assert move(parent,tag).status_code == 409
     assert move(tag,tag).status_code == 409
     assert clean_db.query("select tag_id from task_tags") == [{"tag_id":tag}]*2
+    assert add(2) == tag
     assert move(tag,None).status_code == 200
 
 
