@@ -10,7 +10,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,8 +31,10 @@ def preflight():
     for config in filter(None, configs):
         bindir = Path(subprocess.check_output([config, "--bindir"], text=True).strip())
         if all((bindir / tool).is_file() for tool in ("pg_ctl", "initdb", "psql", "createdb", "postgres")):
-            version = subprocess.check_output([bindir / "postgres", "--version"], text=True).split()[-1]
-            if int(version.split(".")[0]) >= 16:
+            version = subprocess.check_output([bindir / "postgres", "--version"], text=True).split()[2]
+            major = int(version.split(".")[0])
+            installed = PG / "PG_VERSION"
+            if major >= 16 and (not installed.exists() or str(major) == installed.read_text().strip()):
                 break
     else:
         raise SystemExit("Install PostgreSQL 16+ including server tools. Put pg_config on PATH.")
@@ -69,7 +70,7 @@ def cluster(bindir, env):
             socket_dir = str(SOCKET).replace("'", "''")
             conf.write("\nlisten_addresses = ''\nunix_socket_directories = '" + socket_dir + "'\nport = 5432\n")
     if subprocess.run([bindir / "pg_ctl", "-D", PG, "status"], stdout=subprocess.DEVNULL).returncode:
-        run(bindir / "pg_ctl", "-D", PG, "-l", STATE / "postgres.log", "-w", "start")
+        run(bindir / "pg_ctl", "-D", PG, "-l", STATE / "postgres.log", "-w", "start", env=env)
     for db in ("atma", "omni"):
         exists = run(bindir / "psql", "-XAt", "-d", "postgres", "-c",
                      "select 1 from pg_database where datname='" + db + "'", env=env, capture_output=True)
@@ -84,6 +85,7 @@ def main():
     args = parser.parse_args()
     uv, bindir = preflight()
     if args.action == "check":
+        run(uv, "python", "find", "3.12")
         return
     if args.action == "stop-db":
         run(bindir / "pg_ctl", "-D", PG, "-w", "stop")
@@ -106,7 +108,7 @@ def main():
             env[key] = os.environ[key]
     if env.get("OMNI_AI_PROVIDER") == "openrouter" and "OPENROUTER_API_KEY" in os.environ:
         env["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
-    env.update(PGHOST=str(SOCKET), PGPORT="5432", ATMA_AGENT_TOKEN=token.read_text(),
+    env.update(LC_ALL="C", PGHOST=str(SOCKET), PGPORT="5432", ATMA_AGENT_TOKEN=token.read_text(),
                ATMA_DATABASE_URL="dbname=atma", OMNI_DATABASE_URL="dbname=omni", ATMA_GOVERNANCE="1",
                PYTHON_DOTENV_DISABLED="1")
     base = "http://127.0.0.1:" + str(api_port)

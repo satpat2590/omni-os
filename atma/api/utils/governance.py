@@ -17,6 +17,8 @@ LOCK = "LOCK TABLE tags IN SHARE ROW EXCLUSIVE MODE"
 
 
 def suggest(task):
+    if not task.title.strip():
+        raise ValueError("Task title must contain text")
     text = (task.title + " " + (task.description or "")).casefold()
     words = set(re.findall(r"\w+", text))
     for root, labels in SEEDS.items():
@@ -42,7 +44,7 @@ def suggest(task):
         path = answer["path"]
         if (answer["category"] in SEEDS and (not task.category or task.category == answer["category"])
             and isinstance(path, list) and 1 <= len(path) <= 3
-            and all(isinstance(s, str) and 1 <= len(s.strip()) <= 50 and s.isprintable() for s in path)):
+            and all(isinstance(s, str) and 1 <= len(s.strip()) <= 50 and normalized(s) and s.isprintable() for s in path)):
             return answer["category"], [s.strip() for s in path], "provider"
     except Exception as exc:
         logging.getLogger(__name__).warning("Classification fallback (%s)", type(exc).__name__)
@@ -74,12 +76,12 @@ def create(task, assigned, creator):
         cur.execute(LOCK)
         tag = resolve_tag(cur, category, path)
         cur.execute("""INSERT INTO tasks(title,description,category,priority,due_date,is_recurring,
-                       recurrence_pattern,assigned_to,created_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       recurrence_pattern,assigned_to,created_by,classification) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                        RETURNING *""", (task.title,task.description,category,task.priority,task.due_date,
-                       task.is_recurring,task.recurrence_pattern,assigned,creator))
+                       task.is_recurring,task.recurrence_pattern,assigned,creator,
+                       json.dumps({"method": method, "tag_id": tag, "path": path, "policy_version": 1})))
         row = dict(cur.fetchone())
         cur.execute("INSERT INTO task_tags(task_id,tag_id) VALUES (%s,%s)", (row["id"], tag))
-        row["classification"] = {"method": method, "tag_id": tag}
         return row
 
 

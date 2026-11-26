@@ -50,43 +50,33 @@ Your own domains live on your own branch.
 - **Secrets have one home.** Everything reads its keys from the environment. `core/bin/omni-svc`
   loads `~/.config/omni/*.env` for launchd jobs and services; nothing secret goes in a repo or a plist.
 
-## Quick start
+## Local alpha
 
-You need macOS, Python 3.12, PostgreSQL 16 or newer, and [`uv`](https://github.com/astral-sh/uv).
+Start from a clone on macOS using a regular user account. Install uv and PostgreSQL 16 or later with server tools available. The installer checks for both and uses uv to provision Python 3.12 environments. The service processes stay in the foreground.
 
 ```bash
-git clone https://github.com/satpat2590/omni-os.git ~/omni && cd ~/omni
-
-# 1. Secrets and settings: one file, mode 600, outside the repo. Quote every value: the file is
-#    sourced by bash, so an unquoted & or ? in a URL silently drops the line.
-mkdir -p ~/.config/omni && touch ~/.config/omni/omni.env && chmod 600 ~/.config/omni/omni.env
-#    ATMA_DATABASE_URL="postgresql://atma:…@127.0.0.1:5432/atma"
-#    OMNI_DATABASE_URL="postgresql://omni:…@127.0.0.1:5432/omni"
-#    ATMA_AGENT_TOKEN="…"          # bearer token agents and the MCP server use
-#    OPENROUTER_API_KEY="…"        # optional: auto-tagging and Gyani (also ANTHROPIC_API_KEY)
-
-# 2. Atma's database, from nothing.
-createdb atma && createdb omni
-cd atma/api && uv venv --python 3.12 && uv pip install -r requirements-dev.txt
-../../core/bin/omni-svc .venv/bin/python scripts/migrate.py
-psql atma -c "insert into users (id, name) values (1, 'Me')"       # you: the owner of the tree
-
-# 3. Run it.
-../../core/bin/omni-svc .venv/bin/python -m uvicorn main:app --port 8602      # Atma API
-cd ../app && uv venv --python 3.12 && uv pip install -r requirements-dev.txt
-../../core/bin/omni-svc .venv/bin/python -m uvicorn server:app --port 8601   # Atma dashboard
-
-# 4. The runner.
-cd ../../core && uv venv --python 3.12 && uv pip install -e ".[dev]"
-../core/bin/omni-svc .venv/bin/omni migrate && ../core/bin/omni-svc .venv/bin/omni check
+./install.sh check
+./install.sh
 ```
 
-Then open <http://127.0.0.1:8601>. `core/registry.example.yaml` lists the services and the two
-nightly Atma jobs, and `sudo .venv/bin/omni launchd apply` writes their launchd plists from it.
-[`atma/README.md`](atma/README.md) covers every setting.
+Open <http://127.0.0.1:18701> for the dashboard or <http://127.0.0.1:18702/docs> for the API. In a second terminal in this checkout:
 
-`omni check` lists the agent harnesses it can't find (Hermes, OpenCode, Pi). They are optional:
-script jobs need none of them.
+```bash
+./install.sh add "Practice piano for ten minutes"
+./install.sh status
+./install.sh complete 1     # substitute the returned task ID
+./install.sh refresh
+```
+
+The private cluster, owner token and environments live in the ignored `.omni-local/` directory. Ctrl-C stops the two web services. Run `./install.sh stop-db` to stop Postgres and `./install.sh start` to resume. Set `OMNI_LOCAL_API_PORT` and `OMNI_LOCAL_APP_PORT` in both terminals if those ports are occupied. The generated local registry runs the graph renderer through the script harness. The installer creates no system launchd jobs. Use synthetic or low-sensitivity data for this single-user alpha. The dashboard and some read APIs still trust local clients.
+
+### AI configuration
+
+Offline tagging is the default. For a locally served chat model set `OMNI_AI_PROVIDER=local`, `OMNI_AI_MODEL` and optionally `OMNI_LOCAL_BASE_URL` (default HTTP loopback port 8080, path /v1) before starting. For OpenRouter set `OMNI_AI_PROVIDER=openrouter`, `OMNI_AI_MODEL` and `OPENROUTER_API_KEY` in the launch environment. Model selection is operator controlled. See the [OpenRouter chat contract](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion).
+
+Automations can import `omnikit.providers.complete(messages)`. Additional trusted Python packages can register an `omni.providers` entry point whose callable accepts `messages` and `model` as keyword arguments and returns text. Install the package into the calling component's environment. Built-in credentials are scoped by provider selection. Configure custom plugin credentials using its own local configuration. Atma uses the provider for new-task suggestions. The older tutor and exam implementations have their own clients.
+
+See the [product requirements and governance rules](docs/PRODUCT.md), [entity relationship diagram](docs/DATA-MODEL.md), and [base development workflow](docs/DEVELOPMENT.md).
 
 ## Running your own Omni
 
