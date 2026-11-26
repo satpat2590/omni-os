@@ -4,17 +4,17 @@ Omni OS runs personal growth automations on hardware the user controls. Atma sup
 
 | User | Job | Sprint acceptance |
 |---|---|---|
-| New local owner | Start from a clone and keep personal data local | One installer checks prerequisites, creates a private database cluster, migrates both databases and launches Atma. Restart preserves tasks. |
+| New local owner | Start from a clone and keep personal data local | One installer checks prerequisites, creates a private database cluster, migrates both databases and installs Atma.app and Omni.app. Restart preserves tasks. |
 | Person trying an activity | Capture a task without inventing a taxonomy or assigning points | A title alone yields an owned task, a category and an attached tag. The stored decision identifies its source. Completion calculates points. |
 | Person organizing their tree | Move a branch as their understanding changes | Reparenting preserves IDs, descendants and task links. A cycle or cross-category move is rejected. Refresh shows the revised ancestry. |
-| Domain developer | Run a repeatable automation and change model providers | A registered Python script can use the shared provider API. A mindmap refresh writes a run ledger row. A provider failure falls back to offline classification. |
+| Domain developer | Run a repeatable automation and change model providers | The owner adds a domain and registers an executable in Omni.app. A manual run writes a ledger row. A provider failure falls back to offline classification. |
 | Operator | Test a common base before adopting it | Test Atma and core together under Omni Dev. Promote a reviewed public-base commit separately from private instance configuration. |
 
 ## Platform boundary
 
 Core owns the job registry, runner and run ledger. Atma owns tasks, tags, evidence and points. They ship in one repository and version together. The runner invokes the domain's command and receives an exit status. Atma owns the interpretation of its data. A future paid Atma suite needs a separate product and licensing decision.
 
-The installed registry uses the script harness. A user-authored Omni agent can be a registered command that calls a provider and uses the Atma API with an explicit token. The provider accepts messages and returns text. Atma validates suggestions before writing. Scripts that call paid APIs need their own usage accounting because the existing script adapter books zero cost. This sprint enables no paid jobs by default.
+The installed registry starts with the Atma domain, a script harness and zero jobs. Atma.app owns task capture, history and the World Tree. Omni.app owns runtime state, startup preference, domain registration and automation controls. A user-authored Omni agent can be a registered command that calls a provider and uses the Atma API with an explicit token. The provider accepts messages and returns text. Atma validates suggestions before writing. Scripts that call paid APIs need their own usage accounting because the existing script adapter books zero cost. This sprint enables no paid jobs by default.
 
 Existing optional Hermes, OpenCode and Pi adapters remain for earlier instances. External development tools work on branches using ordinary Git and tests. An external runtime can submit work through the same API contract under the owner's chosen scope. A managed fleet, credential distribution, automatic deployments and model training are future work.
 
@@ -30,6 +30,6 @@ Default priority is 3. Base points are ten times priority. Daily recurrence mult
 
 ## First human test and release decision
 
-In Omni Dev, create three activities in your own words, including an unfamiliar one. Record the expected branch before inspecting the result. Complete one activity, refresh the map, move a tag and describe whether the result suggests another activity worth trying. Record time to first task, accepted classifications out of three, any surprise about points, and one next action. Capture observations and severity in the company sprint board. Prioritize the backlog after the session.
+In Omni Dev, create three activities in your own words, including an unfamiliar one. Record the expected branch before inspecting the result. Complete one activity, inspect the World Tree, move a tag through the domain interface and describe whether the result suggests another activity worth trying. Record time to first task, accepted classifications out of three, any surprise about points, and one next action. Capture observations and severity in the company sprint board. Prioritize the backlog after the session.
 
 Engineering acceptance uses a fresh macOS clone, isolated Postgres, API and renderer tests, and the local provider contract test. Human acceptance requires a recorded session. Provider quality, model costs, multi-user exposure, and installation on Linux remain unverified.

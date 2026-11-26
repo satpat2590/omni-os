@@ -90,6 +90,6 @@ def test_the_default_is_this_machines_registry_else_the_base_example(tmp_path, m
 def test_the_shipped_base_example_is_a_valid_atma_only_registry():
     from omni_core import registry
     reg = registry.load(registry.EXAMPLE_PATH)
-    assert set(reg.domains) == {"omni", "atma"}
-    assert {"atma-auto-verify", "omni-mindmap-etl"} <= set(reg.jobs)
-    assert all(job.domain in ("omni", "atma") for job in reg.jobs.values())
+    assert set(reg.domains) == {"atma"}
+    assert set(reg.harnesses) == {"script"}
+    assert not reg.jobs
