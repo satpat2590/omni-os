@@ -63,7 +63,7 @@ def operation(action, data):
                 raise ValueError("An automation is running. Stop Omni after it finishes.")
             subprocess.run([bindir/"pg_ctl","-w","-D",PG,"stop"],check=True)
         running = False
-    if action in ("domain","job","enable","run"):
+    if action in ("domain","job","enable","run","removeJob","removeDomain"):
         name = data["name"].strip()
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,59}",name):
             raise ValueError("Use a name of 1–60 letters, numbers, spaces, dots, underscores or dashes.")
@@ -78,6 +78,12 @@ def operation(action, data):
             if not path.is_absolute() or not path.is_file() or not os.access(path,os.X_OK):
                 raise ValueError("Choose an executable file.")
             registry["jobs"][name] = {"domain":data["domain"],"harness":"script","command":[str(path)],"workdir":str(path.parent),"enabled":True}
+        if action == "removeJob":
+            del registry["jobs"][name]
+        if action == "removeDomain":
+            if name == "atma" or any(job["domain"] == name for job in registry["jobs"].values()):
+                raise ValueError("Only empty custom domains can be removed.")
+            del registry["domains"][name]
         if action == "enable":
             registry["jobs"][name]["enabled"] = bool(data["enabled"])
         save(REGISTRY,registry)

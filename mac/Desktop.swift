@@ -18,7 +18,9 @@ struct Snapshot: Decodable {
 }
 
 @MainActor final class Store: ObservableObject {
-    @Published var data = Snapshot(), busy = false, error = ""
+    @Published var data = Snapshot()
+    @Published var busy = false
+    @Published var error = ""
     func request(_ action: String, _ values: [String: Any] = [:], then: (() -> Void)? = nil) {
         guard !busy else { return }
         busy = true
@@ -70,7 +72,10 @@ struct TreeRow: View {
 
 struct AtmaView: View {
     @ObservedObject var store: Store
-    @State private var section = "Tasks", title = "", edited: Item?, revised = ""
+    @State private var section = "Tasks"
+    @State private var title = ""
+    @State private var edited: Item?
+    @State private var revised = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Picker("View", selection: $section) {
@@ -137,7 +142,10 @@ struct AtmaView: View {
 
 struct OmniView: View {
     @ObservedObject var store: Store
-    @State private var domain = "", selected = "atma", name = "", file: URL?
+    @State private var domain = ""
+    @State private var selected = "atma"
+    @State private var name = ""
+    @State private var file: URL?
     var body: some View {
         Form {
             Section("Platform") {
@@ -152,7 +160,16 @@ struct OmniView: View {
                 }
             }
             Section("Domains") {
-                ForEach(store.data.domains,id:\.self) { Text($0 == "atma" ? "Atma" : $0) }
+                ForEach(store.data.domains,id:\.self) { entry in
+                    HStack {
+                        Text(entry == "atma" ? "Atma" : entry)
+                        Spacer()
+                        if entry != "atma" {
+                            Button("Remove") { store.request("removeDomain",["name":entry]) { selected="atma" } }
+                                .disabled(store.data.jobs.contains { $0.domain == entry })
+                        }
+                    }
+                }
                 HStack {
                     TextField("New domain name",text:$domain)
                     Button("Add domain") { store.request("domain",["name":domain]) {domain=""} }.disabled(domain.isEmpty)
@@ -166,6 +183,8 @@ struct OmniView: View {
                         Spacer()
                         Text(job.domain + " · " + (job.status ?? "Idle")).foregroundStyle(.secondary)
                         Button("Run") { store.request("run",["name":job.name]) }.disabled(!store.data.running || !job.enabled || job.status == "running")
+                        Button { store.request("removeJob",["name":job.name]) } label: {Image(systemName:"minus.circle")}
+                            .help("Remove automation").disabled(job.status == "running")
                     }
                 }
                 Picker("Domain",selection:$selected) {
@@ -204,6 +223,11 @@ struct WindowContent: View {
             }.disabled(store.busy)
         }.padding(22).frame(minWidth:520,minHeight:430)
         .task { store.request(atma ? "openAtma":"platform") }
+        .onReceive(Timer.publish(every: 4, on: .main, in: .common).autoconnect()) { _ in
+            if !atma && store.data.running && !store.data.jobs.isEmpty && store.error.isEmpty && !store.busy {
+                store.request("platform")
+            }
+        }
     }
 }
 
