@@ -1,0 +1,42 @@
+#!/bin/bash
+# omni-dev opencode|pi [ARGS...]: start an Omni developer agent in this checkout.
+#
+#   scripts/omni-dev opencode                 # interactive; the omni-dev agent is the default
+#   scripts/omni-dev pi -p "Work card OMNI-12"  # Pi, one-shot
+#
+# Both read AGENTS.md and the skills in .agents/skills/. This only sets the agent's board identity
+# (OMNI_AGENT) and refuses to start in a live instance tree. It does NOT load this machine's secrets
+# into the agent: the board wrapper (core/bin/omni-board) loads what it needs in its own process, and
+# each harness keeps its own model credentials (`opencode auth login`, Pi's own config).
+set -euo pipefail
+tool="${1:-}"; shift || true
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "omni-dev: run inside an Omni checkout" >&2; exit 2; }
+branch="$(git -C "$root" branch --show-current 2>/dev/null || true)"
+if [ "$root" = "$HOME/omni" ] && [[ "$branch" == instance/* ]]; then
+    echo "omni-dev: $root is the live instance (services run from it). Work in a worktree:" >&2
+    echo "  git -C $root worktree add ../worktrees/<card> -b agent/<agent>/omni-<id>-<slug>" >&2
+    exit 2
+fi
+cd "$root"
+case "$tool" in
+    opencode)
+        export OMNI_AGENT="${OMNI_AGENT:-opencode/omni-dev}"
+        bin="${OPENCODE_BIN:-$(command -v opencode || echo "$HOME/.local/bin/opencode")}"
+        ;;
+    pi)
+        export OMNI_AGENT="${OMNI_AGENT:-pi}"
+        bin="${PI_BIN:-}"
+        for candidate in "$root/core/harnesses/pi/node_modules/.bin/pi" "$(command -v pi || true)"; do
+            [ -z "$bin" ] && [ -n "$candidate" ] && [ -x "$candidate" ] && bin="$candidate"
+        done
+        ;;
+    *)
+        sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+        exit 2
+        ;;
+esac
+[ -n "${bin:-}" ] && [ -x "$bin" ] || { echo "omni-dev: $tool is not installed (see core/harnesses/ or the tool's docs)" >&2; exit 2; }
+echo "omni-dev: $tool as OMNI_AGENT=$OMNI_AGENT in $root ($branch)" >&2
+# Pi gates project skills behind a trust decision; this checkout is the one we mean to work in.
+[ "$tool" = pi ] && exec "$bin" --approve "$@"
+exec "$bin" "$@"

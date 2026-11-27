@@ -21,7 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import adapters, diagram, hermes_cron, jobstate, launchd, readiness, runner, schedule, status
+from . import adapters, diagram, hermes_cron, jobstate, launchd, readiness, runner, schedule, status, board
 from .ledger import Ledger, LedgerError
 from .registry import CORE_DIR, RegistryError, load
 
@@ -200,7 +200,11 @@ def main(argv=None) -> int:
     launchd_p.add_argument("--wait", type=int, default=900, help="seconds to wait for a running job")
     launchd_p.add_argument("--interrupt", action="store_true",
                            help="reload a job still running after --wait (only for jobs that resume safely)")
+    board_p = sub.add_parser("board", help="the shared development board (cards, claims, history)")
+    board.add_arguments(board_p)
     opts = parser.parse_args(argv)
+    if opts.cmd == "board":            # the board needs neither the registry nor the ledger
+        return board.run(opts)
 
     ledger = Ledger()
     try:

@@ -25,6 +25,7 @@ through `bin/omni-svc`, so it has `OMNI_DATABASE_URL` and the job's secrets.
 | `omni launchd diff\|apply [JOB...]` | Shows or writes the launchd plists the registry implies (`apply` uses `sudo`). |
 | `omni diagram [--write]` | Mermaid for the system and every plan. |
 | `omni migrate` | Creates or updates the ledger tables. |
+| `omni board ...` | The shared development board: `list`, `show`, `add`, `claim`, `move`, `release`, `comment`, `link`, `edit`, `migrate`. Writes need `OMNI_AGENT`; the database is `OMNI_BOARD_URL` (else the ledger's). `bin/omni-board` loads the settings. |
 
 ## The registry
 

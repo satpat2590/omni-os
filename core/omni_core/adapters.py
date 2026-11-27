@@ -79,7 +79,10 @@ def build(harness: Harness, job: Job, prompt: Optional[str], scratch: Path) -> I
             argv += ["--agent", job.agent]
         return Invocation(argv=argv + [prompt])
     if harness.kind == "pi":
-        argv = [binary, "-p", "--mode", "json", "--no-session"]
+        # --approve: trust the job's workdir for this run. Without it a headless Pi silently skips the
+        # project's skills (.agents/skills) and settings, since no one is there to answer the trust prompt.
+        # Registering a job with a workdir is the owner's decision to trust that folder.
+        argv = [binary, "-p", "--mode", "json", "--no-session", "--approve"]
         if job.model:
             argv += ["--provider", "openrouter", "--model", job.model]
         if job.tools is not None:

@@ -72,10 +72,12 @@ Nothing moves from an instance back into `main`.
 ```bash
 # as omnidev
 cd ~/omni
+OMNI_AGENT=<you> core/bin/omni-board claim <id>     # the card first (see .agents/skills/omni-change)
 uv venv --python 3.12 core/.venv && uv pip install --python core/.venv/bin/python -e "core[dev]" -e lib
 (cd core && .venv/bin/python -m pytest -q)
 bash omni-sdlc/tests/test_omni_branch.sh && bash omni-sdlc/tests/test_omni_merge_lane.sh
-git commit -am "…" && git push origin main
+git commit -am "…"       # ends with Card: OMNI-<id> and Agent: <you>
+git push origin <branch>  # the operator opens the pull request; CI gates the merge
 
 # as the operator (omni)
 cd ~/worktrees/omni-base                                     # branch public-main
@@ -83,4 +85,41 @@ git pull --ff-only base main                                 # what the testing 
 (cd core && .venv/bin/python -m pytest -q)                   # retest, then publish:
 git push public public-main:main
 cd ~/omni && git merge public-main                           # into instance/<name>; retest
+```
+
+## The agent suite: how agents develop Omni
+
+Every coding agent (Claude Code, Codex, OpenCode, Pi) works from the same context, on the same
+board, and through the same gate.
+
+| File | Read by | What it is |
+|---|---|---|
+| `AGENTS.md` | Codex, OpenCode, Pi (and Claude Code through `CLAUDE.md`) | The contract: accounts, the card-to-PR loop, the hard rules |
+| `.agents/skills/omni-*/SKILL.md` | Pi, OpenCode, Codex; Claude Code through `.claude/skills` | Board, change, test, review, architecture, migrations, release |
+| `.opencode/` | OpenCode | `omni-dev` (the default builder) and `omni-reviewer` (read-only), with permissions that ask before pushing and refuse `git stash`, `pkill`, `launchctl` and `sudo` |
+| `.claude/agents/omni-reviewer.md` | Claude Code | The same read-only reviewer |
+| `scripts/omni-dev` | you | `scripts/omni-dev opencode` or `scripts/omni-dev pi ...`: starts the harness with its board identity. It refuses to start in a live instance tree, and it never loads the machine's secrets into the agent |
+
+**The board.** `core/bin/omni-board` (`omni board` in core) is the shared list of work: cards,
+atomic claims, and a history that records which agent and which account did what. Point every
+account at one board with `OMNI_BOARD_URL`; without it, the board uses the ledger's database.
+Create its tables once with `omni board migrate`.
+
+**The gate.** `.github/workflows/ci.yml` runs every suite against Postgres 16, `scripts/hygiene.py`
+(the base names nobody and no machine; a machine adds private patterns through
+`OMNI_HYGIENE_EXTRA`), and `scripts/check_trailers.py` (every commit in a pull request carries
+`Card: OMNI-<id>` and `Agent: <identity>`). Protect `main` so these checks must pass before merging.
+
+**Headless agents.** An instance can run Pi or OpenCode as a registry job, with a spend cap and a
+ledger row for every run:
+
+```yaml
+# core/registry.yaml on the instance branch
+jobs:
+  dev-triage:
+    domain: omni
+    harness: pi
+    prompt: "Load the omni-board skill. List ready cards and comment on any that lack a clear definition of done."
+    monthly_usd: 5
+    workdir: ~/worktrees/dev-triage
 ```
