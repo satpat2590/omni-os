@@ -26,6 +26,7 @@ def test_offline_paraphrases_and_uncertainty(clean_db, local_nlp):
         ("Going to the gym", "I need to dispute a duplicate charge on my monthly bill.", ["Bills"]),
         ("Don't practice Hiragana Alphabet", None, []),
         ("Watch my cousin lift weights", None, []),
+        ("Go to the pool", "I promised to take photographs of my nephew's swimming lesson.", []),
         ("Get it over with", None, []),
     ]
     for title, description, _ in cases:

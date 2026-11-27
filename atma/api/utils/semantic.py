@@ -85,6 +85,11 @@ class Network:
         return output, inputs["attention_mask"]
 
 
+def entailment_scores(logits):
+    weights = np.exp(logits - logits.max(axis=1, keepdims=True))
+    return weights[:, 1] / weights.sum(axis=1)
+
+
 class SemanticClassifier:
     def __init__(self, directory, current="", ideal=""):
         directory = Path(directory)
@@ -124,8 +129,17 @@ class SemanticClassifier:
         if row["description"] and row["description"].strip():
             premises.append(row["description"])
         # Leave room for the hypothesis. A truncated premise could omit a correction.
-        if any(len(premise) > 4000 or self.verifier.tokenizer.encode(premise).overflowing
-               or len(self.verifier.tokenizer.encode(premise).ids) > 220 for premise in premises):
+        for premise in premises:
+            if len(premise) > 4000:
+                return None
+            tokens = self.verifier.tokenizer.encode(premise)
+            if tokens.overflowing or len(tokens.ids) > 220:
+                return None
+        # An activity witnessed by the user can look very similar to doing it.
+        # Defer when the stated purpose supports that alternative interpretation.
+        observer = "I am there to observe someone else's activity."
+        actor_check, _ = self.verifier.infer([(premises[-1], observer)])
+        if entailment_scores(actor_check)[0] >= 0.80:
             return None
         pairs = []
         for item, _, _, nearest in shortlist:
@@ -134,9 +148,7 @@ class SemanticClassifier:
                     item.hypothesis, item.actor_statement(nearest), item.actor_statement(item.examples[0]),
                 ))
         logits = np.concatenate([self.verifier.infer(pairs[i:i+6])[0] for i in range(0, len(pairs), 6)])
-        probabilities = np.exp(logits - logits.max(axis=1, keepdims=True))
-        entailment = probabilities[:, 1] / probabilities.sum(axis=1)
-        checks = entailment.reshape(len(shortlist), len(premises), 3).max(axis=2)
+        checks = entailment_scores(logits).reshape(len(shortlist), len(premises), 3).max(axis=2)
         supported = []
         for (item, similarity, affinity, _), evidence in zip(shortlist, checks):
             # A clarifying description can override a misleading title.
