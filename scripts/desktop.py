@@ -139,10 +139,15 @@ def operation(action, data):
         if action == "complete":
             complete_task_record(tid,None)
         elif action == "edit":
-            db.query("update tasks set title=%s where id=%s",(data["title"].strip(),tid))
+            if "description" in data:
+                db.query("update tasks set title=%s, description=%s where id=%s",
+                         (data["title"].strip(), data["description"].strip() or None, tid))
+            else:
+                db.query("update tasks set title=%s where id=%s",(data["title"].strip(),tid))
         else:
             db.query("update tasks set is_active=false where id=%s",(tid,))
-    tasks = db.query("""select t.id,t.title,t.category,t.is_active,coalesce(sum(c.points),0)::int points
+    tasks = db.query("""select t.id,t.title,t.description,t.category,t.is_active,
+        t.classification->>'method' as classification_method,coalesce(sum(c.points),0)::int points
         from tasks t left join task_completions c on c.task_id=t.id
         where t.assigned_to=1 or t.assigned_to is null group by t.id order by t.id desc""")
     tags = db.query("select id,parent_tag_id,name,category from tags order by name,id")

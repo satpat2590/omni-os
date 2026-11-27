@@ -12,9 +12,9 @@ Open **Omni** to start or stop the platform, choose whether opening Atma starts 
 
 ## Atma classification
 
-Omni → Atma classification controls the daily pass. It defaults to the offline catalog. For unresolved tasks, select **Catalog and model**, enter an OpenAI-compatible base URL, model ID and optional API key, then save. OpenRouter uses `https://openrouter.ai/api/v1`. A local server can use a loopback URL such as `http://127.0.0.1:8080/v1`. Remote endpoints require HTTPS. The key is stored in the installing account’s private, mode-600 classifier settings file outside version control. Changing the endpoint clears the old key unless you enter a replacement.
+Omni → Atma classification controls the daily pass. It defaults to the offline catalog, which recognizes complete activity titles. Other wording and tasks with descriptions wait for contextual classification. Select **Catalog and model**, enter an OpenAI-compatible base URL, model ID and optional API key, then save. OpenRouter uses `https://openrouter.ai/api/v1`. A local server can use a loopback URL such as `http://127.0.0.1:8080/v1`. Remote endpoints require HTTPS. The key is stored in the installing account’s private, mode-600 classifier settings file outside version control. Changing the endpoint clears the old key unless you enter a replacement.
 
-Use **Classify now** for an immediate pass. The per-user LaunchAgent runs at 3 AM local time and checks at login. A stopped Omni database stays stopped. The report gives call, classification, pending and error counts. Switch back to offline mode to keep task content on this Mac.
+Use **Classify now** for an immediate pass. The per-user LaunchAgent runs at 3 AM local time and checks at login. A stopped Omni database stays stopped. The report gives call, classification, pending and error counts. If the model needs clarification, Atma shows **Needs context**. Use **Edit task** to describe the intended outcome, then run the next pass. Switch back to offline mode to keep task content on this Mac.
 
 ## Development
 

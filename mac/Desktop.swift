@@ -3,6 +3,7 @@ import AppKit
 
 struct Item: Codable, Identifiable {
     let id: Int, title: String, category: String, is_active: Bool, points: Int
+    let description: String?, classification_method: String?
 }
 struct Branch: Codable, Identifiable {
     let id: String, title: String, children: [Branch]?, points: Int?
@@ -85,6 +86,7 @@ struct AtmaView: View {
     @State private var title = ""
     @State private var edited: Item?
     @State private var revised = ""
+    @State private var context = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Picker("View", selection: $section) {
@@ -118,12 +120,16 @@ struct AtmaView: View {
                             }
                             VStack(alignment:.leading) {
                                 Text(task.title)
-                                Text(task.category.capitalized).font(.caption).foregroundStyle(.secondary)
+                                Text(task.classification_method == "needs_context" ? "Needs context" : task.category.capitalized).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             if task.is_active {
                                 Menu {
-                                    Button("Rename") { revised = task.title; edited = task }
+                                    Button("Edit task") {
+                                        revised = task.title
+                                        context = task.description ?? ""
+                                        edited = task
+                                    }
                                     Button("Archive") { store.request("archive",["id":task.id]) }
                                 } label: { Image(systemName:"ellipsis") }.menuStyle(.borderlessButton).frame(width:32)
                             } else { Text("\(task.points) pts").foregroundStyle(.secondary) }
@@ -133,11 +139,13 @@ struct AtmaView: View {
             }
         }.sheet(item:$edited) { task in
             VStack(alignment:.leading,spacing:16) {
-                Text("Rename task").font(.headline)
+                Text("Edit task").font(.headline)
                 TextField("Task title",text:$revised)
+                TextField("What do you want to accomplish? (optional)",text:$context,axis:.vertical)
+                    .lineLimit(2...5)
                 HStack {
                     Button("Cancel") { edited=nil }
-                    Button("Save") { edited=nil; store.request("edit",["id":task.id,"title":revised]) }
+                    Button("Save") { edited=nil; store.request("edit",["id":task.id,"title":revised,"description":context]) }
                         .keyboardShortcut(.defaultAction).disabled(revised.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
                 }
             }.padding(24).frame(width:400)

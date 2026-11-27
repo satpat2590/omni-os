@@ -59,9 +59,9 @@ def test_local_provider_and_malformed_output_fallback(owner, monkeypatch):
             monkeypatch.setenv("OMNI_AI_BASE_URL",f"http://127.0.0.1:{server.server_port}/v1")
             from utils.daily import run
             from omnikit.providers import complete
-            unknown = owner.post("/api/tasks",json={"title":"Prepare for tomorrow"}).json()
+            unknown = owner.post("/api/tasks",json={"title":"Learn how chords fit together"}).json()
             assert unknown["category"] == "unclassified"
-            server.answer = '{"category":"mental","base":"Music","leaf":"Harmony"}'
+            server.answer = '{"target":"mental/Music","leaf":"Harmony","source":"title"}'
             result = run(complete,"test-model")
             assert result["classified"] == result["calls"] == 1
             assert run(complete,"test-model")["calls"] == 0
@@ -95,13 +95,13 @@ def test_catalog_capture(owner,title,category,path):
 def test_refine_old_languages_link_after_base_moved(owner,clean_db):
     from utils.daily import run, tag_paths
     task = owner.post("/api/tasks",json={
-        "title":"Practice a language","description":"Review flashcards"
+        "title":"Practice a language"
     }).json()
     base = task["classification"]["tag_id"]
     new_parent = clean_db.query("insert into tags(name,category) values ('Skills','mental') returning id")[0]["id"]
     governance.move(base,new_parent)
-    clean_db.query("""update tasks set description='Review Hiragana flashcards',
-        classification=classification || '{"catalog_revision":1,"input_description":"Review Hiragana flashcards"}'
+    clean_db.query("""update tasks set title='Practice Hiragana Alphabet',
+        classification=classification || '{"catalog_revision":1,"input_title":"Practice Hiragana Alphabet"}'
         where id=%s""",(task["id"],))
     assert run()["classified"] == 1
     leaf = clean_db.query("select tag_id from task_tags where task_id=%s",(task["id"],))[0]["tag_id"]
@@ -113,11 +113,11 @@ def test_refine_old_languages_link_after_base_moved(owner,clean_db):
 
 def test_provider_selects_deep_catalog_path(owner,clean_db):
     from utils.daily import run, tag_paths
-    task = owner.post("/api/tasks",json={"title":"Review yesterday's flashcards"}).json()
+    task = owner.post("/api/tasks",json={"title":"Review flashcards for Japanese characters of Chinese origin"}).json()
     path = ["Languages","Japanese","Kanji"]
     def choose(messages):
-        assert path in json.loads(messages[-1]["content"])["catalog"]["mental"]
-        return json.dumps({"category":"mental","path":path})
+        assert "mental/Languages/Japanese/Kanji" in json.loads(messages[-1]["content"])["catalog"]
+        return json.dumps({"target":"mental/Languages/Japanese/Kanji","source":"title"})
     assert run(choose,"test-model")["classified"] == 1
     tag = clean_db.query("select tag_id from task_tags where task_id=%s",(task["id"],))[0]["tag_id"]
     assert next(t["path"] for t in tag_paths() if t["id"] == tag) == path
@@ -141,7 +141,7 @@ def test_model_budget_and_manual_links(owner,clean_db):
     from utils.daily import run
     for title in ("Prepare tomorrow","Think ahead","Try something new"):
         owner.post("/api/tasks",json={"title":title})
-    answer = lambda _: '{"category":"social","base":"Community"}'
+    answer = lambda _: '{"target":"social/Community","source":"title"}'
     assert run(answer,"example",1)["calls"] == 1
     assert run(answer,"example",1)["classified"] == 1
     unmatched = clean_db.query("select id from tasks where category='unclassified'")[0]["id"]
@@ -177,5 +177,75 @@ def test_existing_catalog_id_reused(owner,clean_db):
     task = owner.post("/api/tasks",json={"title":"Rehearse the new arrangement"}).json()
     assert task["category"] == "unclassified"
     tag = known["classification"]["tag_id"]
-    assert run(lambda _:json.dumps({"existing":tag}),"model")["classified"] == 1
+    assert run(lambda _:json.dumps({"target":f"tag:{tag}","source":"title"}),"model")["classified"] == 1
     assert clean_db.query("select tag_id from task_tags where task_id=%s",(task["id"],)) == [{"tag_id":tag}]
+
+
+@pytest.mark.parametrize("title,description", [
+    ("Cancel the gym membership", None),
+    ("Meet my sister at the gym to reconnect", None),
+    ("Don't practice Hiragana Alphabet", None),
+    ("Book it", None),
+    ("Going to the gym", "Only to pick up my brother after his workout"),
+    ("Pay rent?", None),
+])
+def test_incidental_words_do_not_assign_tags(owner, clean_db, title, description):
+    task = owner.post("/api/tasks", json={"title": title, "description": description}).json()
+    assert task["classification"]["method"] == "pending"
+    assert task["category"] == "unclassified"
+    assert not clean_db.query("select id from tags")
+
+
+def test_unclear_intent_waits_for_context_then_routes_once(owner, clean_db):
+    from utils.daily import run
+    task = owner.post("/api/tasks", json={"title": "Sort out the gym thing"}).json()
+    answer = lambda _: '{"target":null}'
+    assert run(answer)["pending"] == 1
+    assert run(answer)["calls"] == 0
+    assert not clean_db.query("select id from tags")
+    context = "I want to reconnect with my sister after her class"
+    clean_db.query("update tasks set description=%s where id=%s", (context, task["id"]))
+    def decide(messages):
+        payload = json.loads(messages[-1]["content"])
+        assert payload["title"] == task["title"] and payload["description"] == context
+        return json.dumps({"target":"social/Relationships","source":"description"})
+    assert run(decide, "local-test")["classified"] == 1
+    assert run(decide)["calls"] == 0
+    row = clean_db.query("select category,classification from tasks where id=%s", (task["id"],))[0]
+    assert row["category"] == "social"
+    assert row["classification"]["evidence_source"] == "description"
+    assert row["classification"]["input_description"] == context
+    assert row["classification"]["model"] == "local-test"
+
+
+def test_missing_evidence_source_keeps_task_pending(owner, clean_db):
+    from utils.daily import run
+    owner.post("/api/tasks", json={"title":"Sort out the gym thing"})
+    answer = lambda _: '{"target":"physical/Movement","source":"description"}'
+    assert run(answer)["errors"] == 1
+    assert not clean_db.query("select id from tags")
+
+
+def test_revisits_legacy_incidental_match(owner, clean_db):
+    from utils.daily import run
+    task = owner.post("/api/tasks", json={"title":"Going to the gym"}).json()
+    title = "Cancel my gym membership"
+    clean_db.query("""update tasks set title=%s,
+        classification=classification || jsonb_build_object('catalog_revision',2,'input_title',%s::text)
+        where id=%s""", (title, title, task["id"]))
+    assert run()["pending"] == 1
+    assert clean_db.query("select category from tasks where id=%s", (task["id"],))[0]["category"] == "unclassified"
+    assert not clean_db.query("select tag_id from task_tags where task_id=%s", (task["id"],))
+
+
+def test_edit_during_model_call_discards_stale_decision(owner, clean_db):
+    from utils.daily import run
+    task = owner.post("/api/tasks", json={"title":"Meet my sister at the gym to reconnect"}).json()
+    def decide(_):
+        clean_db.query("update tasks set title='Practice Japanese' where id=%s", (task["id"],))
+        return '{"target":"social/Relationships","source":"title"}'
+    assert run(decide)["skipped"] == 1
+    assert not clean_db.query("select id from tags")
+    assert run()["classified"] == 1
+    row = clean_db.query("select classification from tasks where id=%s", (task["id"],))[0]
+    assert row["classification"]["path"] == ["Languages","Japanese"]
