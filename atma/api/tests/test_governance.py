@@ -73,18 +73,54 @@ def test_local_provider_and_malformed_output_fallback(owner, monkeypatch):
             thread.join()
 
 
-@pytest.mark.parametrize("title,category,tag", [
-    ("Do three sets of squats at the gym","physical","Strength Training"),
-    ("Practice Python algorithms","mental","Computer Science"),
-    ("Go to the Gym","physical","Movement"),
-    ("Pay rent","financial","Bills"),
-    ("Catch up with a friend","social","Relationships"),
-    ("Prepare for tomorrow","unclassified",None),
+@pytest.mark.parametrize("title,category,path", [
+    ("Do three sets of squats at the gym","physical",["Strength Training","Squats"]),
+    ("Practice Python algorithms","mental",["Computer Science"]),
+    ("Going to the Gym","physical",["Movement"]),
+    ("Practice Hiragana Alphabet","mental",["Languages","Japanese","Hiragana"]),
+    ("Practice writing katakana","mental",["Languages","Japanese","Katakana"]),
+    ("Review hiragana and katakana","mental",["Languages","Japanese"]),
+    ("Practice Japanese","mental",["Languages","Japanese"]),
+    ("Practice French and Spanish","mental",["Languages"]),
+    ("Pay rent","financial",["Bills"]),
+    ("Catch up with a friend","social",["Relationships"]),
+    ("Prepare for tomorrow","unclassified",[]),
 ])
-def test_catalog_capture(owner,title,category,tag):
+def test_catalog_capture(owner,title,category,path):
     row = owner.post("/api/tasks",json={"title":title}).json()
     assert row["category"] == category
-    assert row["classification"]["path"] == ([tag] if tag else [])
+    assert row["classification"]["path"] == path
+
+
+def test_refine_old_languages_link_after_base_moved(owner,clean_db):
+    from utils.daily import run, tag_paths
+    task = owner.post("/api/tasks",json={
+        "title":"Practice a language","description":"Review flashcards"
+    }).json()
+    base = task["classification"]["tag_id"]
+    new_parent = clean_db.query("insert into tags(name,category) values ('Skills','mental') returning id")[0]["id"]
+    governance.move(base,new_parent)
+    clean_db.query("""update tasks set description='Review Hiragana flashcards',
+        classification=classification || '{"catalog_revision":1,"input_description":"Review Hiragana flashcards"}'
+        where id=%s""",(task["id"],))
+    assert run()["classified"] == 1
+    leaf = clean_db.query("select tag_id from task_tags where task_id=%s",(task["id"],))[0]["tag_id"]
+    assert next(t["path"] for t in tag_paths() if t["id"] == leaf) == ["Skills","Languages","Japanese","Hiragana"]
+    again = owner.post("/api/tasks",json={"title":"Practice ひらがな"}).json()
+    assert again["classification"]["tag_id"] == leaf
+    assert run()["classified"] == 0
+
+
+def test_provider_selects_deep_catalog_path(owner,clean_db):
+    from utils.daily import run, tag_paths
+    task = owner.post("/api/tasks",json={"title":"Review yesterday's flashcards"}).json()
+    path = ["Languages","Japanese","Kanji"]
+    def choose(messages):
+        assert path in json.loads(messages[-1]["content"])["catalog"]["mental"]
+        return json.dumps({"category":"mental","path":path})
+    assert run(choose,"test-model")["classified"] == 1
+    tag = clean_db.query("select tag_id from task_tags where task_id=%s",(task["id"],))[0]["tag_id"]
+    assert next(t["path"] for t in tag_paths() if t["id"] == tag) == path
 
 
 def test_old_fallback_and_changed_title(owner,clean_db):

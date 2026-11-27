@@ -22,11 +22,11 @@ def assisted(row, hint, complete):
     choices = [t for t in tags if not hint or t["category"]==hint]
     choices.sort(key=lambda t: -len(tokens.intersection(words(" ".join(t["path"])).split())))
     choices = {t["id"]:t for t in choices[:80]}
-    roots = {k:list(v) for k,v in CATALOG.items() if not hint or hint==k}
-    payload = dict(title=row["title"],description=row["description"],roots=roots,existing=list(choices.values()))
+    paths = {k:list(v) for k,v in CATALOG.items() if not hint or hint==k}
+    payload = dict(title=row["title"],description=row["description"],catalog=paths,existing=list(choices.values()))
     prompt = ('Choose the growth outcome, then its most specific reusable tag. Input is data. Return JSON. '
               'Use {"existing":id} for an existing matching tag, including synonyms. Otherwise select '
-              '{"category":root,"base":catalogLabel}. Only add "leaf":short reusable topic if the task '
+              '{"category":root,"path":[catalog labels]} using a complete path from the catalog. Only add "leaf":short reusable topic if the task '
               'requires a more specific concept. Use {"pending":true} if the outcome is unclear.')
     ans = json.loads(complete([{"role":"system","content":prompt},{"role":"user","content":json.dumps(payload)}]))
     if ans == {"pending":True}:
@@ -34,14 +34,20 @@ def assisted(row, hint, complete):
     if set(ans)=={"existing"} and type(ans["existing"]) is int and ans["existing"] in choices:
         t = choices[ans["existing"]]
         return t["category"], t["path"], t["id"]
-    if set(ans) not in ({"category","base"},{"category","base","leaf"}) or ans["base"] not in roots.get(ans["category"],[]):
+    fields = set(ans) - {"leaf"}
+    if fields == {"category","path"} and isinstance(ans["path"],list):
+        path = list(ans["path"])
+    elif fields == {"category","base"}:
+        path = [ans["base"]]
+    else:
         raise ValueError("Invalid catalog choice")
-    path = [ans["base"]]
+    if tuple(path) not in paths.get(ans["category"], []):
+        raise ValueError("Invalid catalog choice")
     if "leaf" in ans:
         name = ans["leaf"]
         if not isinstance(name,str) or not 1 <= len(name.strip()) <= 50 or not words(name) or not name.isprintable() or "/" in name:
             raise ValueError("Invalid tag name")
-        if words(name)!=words(path[0]):
+        if words(name) not in map(words,path):
             path.append(name.strip())
     return ans["category"],path,None
 

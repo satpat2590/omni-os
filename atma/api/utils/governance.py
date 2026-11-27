@@ -5,7 +5,7 @@ import re
 
 from .db import db
 
-from .taxonomy import REVISION, lookup
+from .taxonomy import CATALOG, REVISION, lookup
 
 LOCK = "LOCK TABLE tags IN SHARE ROW EXCLUSIVE MODE"
 
@@ -19,14 +19,26 @@ def normalized(text):
 
 
 def resolve_tag(cur, category, path):
-    # A seed label can move. Keep routing to it if its name still identifies one tag.
-    if len(path) == 1:
-        cur.execute("SELECT id,name FROM tags WHERE category=%s", (category,))
-        exact = [r["id"] for r in cur.fetchall() if normalized(r["name"]) == normalized(path[0])]
-        if len(exact) == 1:
-            return exact[0]
+    # Catalog nodes can move. Anchor at the deepest label that still
+    # identifies one catalog path and one tag in this category.
+    cur.execute("SELECT id,name FROM tags WHERE category=%s", (category,))
+    ids_by_name = {}
+    for row in cur.fetchall():
+        ids_by_name.setdefault(normalized(row["name"]), []).append(row["id"])
+    catalog = CATALOG[category]
     parent = None
-    for name in path:
+    remaining = path
+    for depth in range(len(path), 0, -1):
+        prefix = tuple(path[:depth])
+        if prefix not in catalog:
+            continue
+        name = prefix[-1]
+        ids = ids_by_name.get(normalized(name), [])
+        if len(ids) == 1 and sum(p[-1] == name for p in catalog) == 1:
+            parent = ids[0]
+            remaining = path[depth:]
+            break
+    for name in remaining:
         cur.execute("SELECT id,name FROM tags WHERE category=%s AND parent_tag_id IS NOT DISTINCT FROM %s ORDER BY id", (category, parent))
         candidates = cur.fetchall()
         target = normalized(name)
