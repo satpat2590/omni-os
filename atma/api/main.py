@@ -1,4 +1,5 @@
  # main.py
+import os
 import asyncio
 import calendar
 import re
@@ -25,6 +26,8 @@ from utils.data import (
     TaskUpdate,
 )
 from utils.tags import auto_tag_task
+from utils import governance
+from utils.data import TagMove
 
 # Set up the FastAPI backend. Use uvicorn as your web server (preferably)
 app = FastAPI()
@@ -590,6 +593,13 @@ async def create_task(task: TaskCreate, _: AgentPrincipal = Depends(require_writ
         :response: A TaskResponse object
     """
     try:
+        if os.getenv("ATMA_GOVERNANCE") == "1" or not task.category:
+            assigned = _resolve_user_id(task.assigned_to) if task.assigned_to else int(os.getenv("ATMA_OWNER_ID", "1"))
+            creator = _resolve_user_id(task.created_by)
+            result = await asyncio.to_thread(governance.create, task, assigned, creator)
+            result["assigned_to_name"] = _resolve_user_name(result.get("assigned_to"))
+            result["created_by_name"] = _resolve_user_name(result.get("created_by"))
+            return result
         insert_data = {
             "title": task.title,
             "description": task.description,
@@ -640,6 +650,16 @@ async def create_task(task: TaskCreate, _: AgentPrincipal = Depends(require_writ
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.patch("/api/tags/{tag_id}/parent")
+def move_tag(tag_id: int, change: TagMove, agent: AgentPrincipal = Depends(require_write_agent)):
+    if agent.name != "atma-agent":
+        raise HTTPException(status_code=403, detail="Owner write token required")
+    try:
+        return governance.move(tag_id, change.parent_tag_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.patch("/api/tasks/{task_id}", response_model=TaskResponse)
 async def update_task(
     task_id: int,
@@ -664,6 +684,7 @@ async def update_task(
             update_data["description"] = task.description
         if "category" in provided:
             update_data["category"] = task.category
+            update_data["classification"] = None  # A manual category supersedes automatic routing.
         if "priority" in provided:
             update_data["priority"] = task.priority
         if "due_date" in provided:
@@ -899,7 +920,8 @@ async def get_skill_tree():
         "children": [],
     }
 
-    available_categories = sorted({tag["category"] for tag in tags if tag.get("category")})
+    available_categories = sorted({tag["category"] for tag in tags if tag.get("category")} |
+                                  {task["category"] for task in tasks if task.get("category")})
     categories = [category for category in DEFAULT_CATEGORIES if category in available_categories] + [
         category for category in available_categories if category not in DEFAULT_CATEGORIES
     ]

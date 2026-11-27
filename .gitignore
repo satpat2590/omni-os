@@ -33,3 +33,6 @@ state/
 
 # Editable-install metadata
 *.egg-info/
+
+# Local install (private PostgreSQL cluster, token and per-component environments)
+.omni-local/

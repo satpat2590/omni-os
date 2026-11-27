@@ -8,7 +8,7 @@ import zoneinfo
 class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    category: str
+    category: Optional[str] = None
     priority: int = 3
     due_date: Optional[datetime] = None
     is_recurring: bool = False
@@ -24,7 +24,12 @@ class TaskCreate(BaseModel):
             return v.replace(tzinfo=eastern)
         return v
 
+class TagMove(BaseModel):
+    parent_tag_id: Optional[int]
+
+
 class TaskResponse(BaseModel):
+    classification: Optional[dict] = None
     id: int
     title: str
     description: Optional[str]

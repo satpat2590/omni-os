@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 HOME = Path.home()
-OUT_DIR = HOME / "omni" / "static"
+OUT_DIR = Path(__file__).resolve().parent / "static"
 GRAPH_JSON = OUT_DIR / "graph.json"
 
 
@@ -121,6 +121,9 @@ def main():
     # domain fold: non-root categories roll into financial (SPEC §4c)
     DOMAIN_FOLD = {}   # a category outside the four roots folds into one of them; extend per machine
     ROOT_DOMAINS = ("physical", "mental", "financial", "social")
+
+    if any(task["category"] == "unclassified" for task in tasks):
+        ROOT_DOMAINS += ("unclassified",)
 
     def fold(cat):
         return DOMAIN_FOLD.get(cat, cat) if cat in ROOT_DOMAINS or cat in DOMAIN_FOLD else "mental"
@@ -291,10 +294,15 @@ def main():
     print("Embedding for semantic layout...")
     field_nodes = [n for n in nodes if n["type"] in ("field", "subfield")]
     if field_nodes:
-        X = np.array(embed([n["label"] for n in field_nodes]))
-        X = np.nan_to_num(X)
-        from sklearn.decomposition import PCA
-        pos2 = PCA(n_components=2).fit_transform(X)
+        # A new tree often has only one field. PCA needs at least two samples/features for
+        # two components; TF-IDF can have only one feature even when there are several tags.
+        pos2 = np.zeros((len(field_nodes), 2))
+        if len(field_nodes) > 1:
+            X = np.nan_to_num(np.array(embed([n["label"] for n in field_nodes])))
+            if X.shape[1] and np.any(np.ptp(X, axis=0)):
+                from sklearn.decomposition import PCA
+                dimensions = min(2, X.shape[0], X.shape[1])
+                pos2[:, :dimensions] = PCA(n_components=dimensions).fit_transform(X)
         pos2 = (pos2 - pos2.mean(axis=0)) / (pos2.std(axis=0) + 1e-9)
 
         for i, n in enumerate(field_nodes):
