@@ -16,4 +16,7 @@ for candidate in "$core/.venv/bin/python" "$core/../.omni-local/base/bin/python"
     [ -x "$candidate" ] && py="$candidate"
 done
 [ -n "$py" ] || { echo "omni-board: no Python with Omni core (create core/.venv; see .agents/skills/omni-test)" >&2; exit 2; }
-PYTHONPATH="$core${PYTHONPATH:+:$PYTHONPATH}" exec "$svc" "$py" -m omni_core.cli board "$@"
+# PYTHONPATH is set after omni-svc has loaded the env files (an instance env may set its own, pointing at
+# another core), and -P keeps the working directory off sys.path (run from inside another checkout's
+# core/, `python -m` would import that copy). Either way this checkout's board must be the one that runs.
+exec "$svc" env PYTHONPATH="$core" "$py" -P -m omni_core.cli board "$@"
