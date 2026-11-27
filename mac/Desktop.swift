@@ -17,6 +17,7 @@ struct ClassificationReport: Decodable {
 }
 struct ClassifierSettings: Decodable {
     var mode: String, endpoint: String, model: String, limit: Int, daily: Bool, hasKey: Bool
+    var currentState: String, idealState: String, shareContext: Bool, nlpReady: Bool
     var report: ClassificationReport
 }
 struct Snapshot: Decodable {
@@ -167,6 +168,9 @@ struct ClassifierForm: View {
     @State private var forget = false
     @State private var limit: Int
     @State private var daily: Bool
+    @State private var currentState: String
+    @State private var idealState: String
+    @State private var shareContext: Bool
 
     init(store: Store, settings: ClassifierSettings) {
         self.store = store
@@ -176,19 +180,32 @@ struct ClassifierForm: View {
         _model = State(initialValue:settings.model)
         _limit = State(initialValue:settings.limit)
         _daily = State(initialValue:settings.daily)
+        _currentState = State(initialValue:settings.currentState)
+        _idealState = State(initialValue:settings.idealState)
+        _shareContext = State(initialValue:settings.shareContext)
     }
 
     var body: some View {
         Section("Atma classification") {
             Picker("Classifier", selection:$mode) {
-                Text("Offline catalog").tag("offline")
-                Text("Catalog and model").tag("compatible")
+                Text("Static activities · offline").tag("static")
+                Text("Local NLP · free").tag("offline")
+                Text("Local NLP + API for uncertain tasks").tag("compatible")
+                Text("API for all free-form tasks").tag("api")
             }
-            if mode == "compatible" {
+            if (mode == "offline" || mode == "compatible") && !settings.nlpReady {
+                Button("Download offline NLP models (about 120 MB)") { store.request("installNLP") }
+            }
+            if mode != "static" {
+                TextField("Current situation (optional)",text:$currentState,axis:.vertical)
+                TextField("What do you want to work toward? (optional)",text:$idealState,axis:.vertical)
+            }
+            if mode == "compatible" || mode == "api" {
                 TextField("API base URL",text:$endpoint)
                 TextField("Model ID",text:$model)
                 SecureField(settings.hasKey ? "Replace saved API key" : "API key (optional for local models)",text:$key)
                 if settings.hasKey { Toggle("Forget saved key",isOn:$forget) }
+                Toggle("Include my growth context in API requests",isOn:$shareContext)
                 Stepper("Up to \(limit) model calls per pass",value:$limit,in:1...100)
                 Text("Unresolved task titles, descriptions and candidate tags go to this endpoint. Use the model ID to choose your provider’s pricing tier.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -196,7 +213,11 @@ struct ClassifierForm: View {
             Toggle("Classify daily at 3 AM",isOn:$daily)
             HStack {
                 Button("Save settings") {
-                    store.request("classifierSave",["mode":mode,"endpoint":endpoint,"model":model,"key":key,"forgetKey":forget,"daily":daily,"limit":limit]) { key=""; forget=false }
+                    store.request("classifierSave",["mode":mode,"endpoint":endpoint,"model":model,"key":key,"forgetKey":forget,"daily":daily,"limit":limit,
+                        "currentState":currentState,"idealState":idealState,"shareContext":shareContext]) {
+                        key=""; forget=false
+                        shareContext=store.data.classifier?.shareContext ?? false
+                    }
                 }
                 Button("Classify now") { store.request("classify") }.disabled(!store.data.running)
             }

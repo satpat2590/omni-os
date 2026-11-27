@@ -12,9 +12,20 @@ Open **Omni** to start or stop the platform, choose whether opening Atma starts 
 
 ## Atma classification
 
-Omni → Atma classification controls the daily pass. It defaults to the offline catalog, which recognizes complete activity titles. Other wording and tasks with descriptions wait for contextual classification. Select **Catalog and model**, enter an OpenAI-compatible base URL, model ID and optional API key, then save. OpenRouter uses `https://openrouter.ai/api/v1`. A local server can use a loopback URL such as `http://127.0.0.1:8080/v1`. Remote endpoints require HTTPS. The key is stored in the installing account’s private, mode-600 classifier settings file outside version control. Changing the endpoint clears the old key unless you enter a replacement.
+Open **Omni → Atma classification** to choose how the daily pass handles free-form tasks. Recognized whole activity titles still work immediately in every mode.
 
-Use **Classify now** for an immediate pass. The per-user LaunchAgent runs at 3 AM local time and checks at login. A stopped Omni database stays stopped. The report gives call, classification, pending and error counts. If the model needs clarification, Atma shows **Needs context**. Use **Edit task** to describe the intended outcome, then run the next pass. Switch back to offline mode to keep task content on this Mac.
+| Mode | What happens | API cost |
+|---|---|---|
+| Static activities | Recognizes complete catalog activities and leaves other tasks pending. Runs without a model. | None |
+| Local NLP (default) | Retrieves similar activities and checks whether the task supports a proposed tag. Uncertain tasks wait for context. | None |
+| Local NLP + API | Sends unresolved tasks to the selected model after the local check. | Up to the configured calls per pass |
+| API for all free-form tasks | Sends each queued free-form task to the selected model, subject to the same limit. | Depends on provider and model |
+
+The installer downloads about 120 MB of checksum-verified English NLP model files once. Local inference then works offline. For a model-free installation use `./install.sh install --static-only`. You can download the models later in Omni.
+
+Optional **Current situation** and **What do you want to work toward?** settings help rank close matches. These fields stay on the Mac unless you enable sharing with your chosen endpoint. Changing the endpoint clears that permission and the previous API key. Enter an OpenAI-compatible base URL, model ID and optional API key for the API modes. The key is stored in the installing account’s private, mode-600 settings file.
+
+Choose **Classify now** for an immediate pass. The scheduled pass runs at 3 AM local time and checks at login. In Atma, **Needs context** means the classifier abstained. Choose **Edit task**, clarify the intended outcome, then run another pass.
 
 ## Development
 

@@ -81,6 +81,7 @@ def runtime_env():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["install","check","test"], default="install", nargs="?")
+    parser.add_argument("--static-only", action="store_true", help="Skip the local NLP models")
     args = parser.parse_args()
     uv, bindir = preflight()
     if args.action == "check":
@@ -90,6 +91,10 @@ def main():
     os.umask(0o077)
     STATE.mkdir(exist_ok=True)
     env = runtime_env()
+    if not args.static_only:
+        from nlp_assets import install as install_models
+        install_models(STATE/"nlp")
+        env["ATMA_TEST_NLP_DIR"] = str(STATE/"nlp")
     if args.action == "test":
         cluster(bindir, env)
         env["ATMA_TEST_SERVER_URL"] = "dbname=postgres"
@@ -112,7 +117,9 @@ def main():
     run(STATE/"base/bin/omni","migrate",env=env)
     from bundles import install_apps
     install_apps(ROOT, STATE)
-    from classifier import install_schedule
+    from classifier import config, configure, install_schedule
+    if args.static_only:
+        configure(dict(config(), mode="static"))
     install_schedule()
 
 

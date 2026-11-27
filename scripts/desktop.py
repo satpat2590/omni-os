@@ -51,6 +51,9 @@ def operation(action, data):
     if registry["jobs"].get("mindmap") == demo:
         del registry["jobs"]["mindmap"]
         save(REGISTRY, registry)
+    if action == "installNLP":
+        from nlp_assets import install
+        install(STATE/"nlp")
     if action=="classifierSave":
         classifier.configure(data)
     if action=="classify":

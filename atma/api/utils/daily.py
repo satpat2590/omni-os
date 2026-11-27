@@ -1,4 +1,5 @@
 """Resolve uncertain, stale, or old fallback decisions without disturbing manual links."""
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,10 +26,7 @@ class Selection:
     tag_id: int | None = None
 
 
-def assisted(row, hint, complete):
-    tokens = set(words(row["title"] + " " + (row["description"] or "")).split())
-    choices = [tag for tag in tag_paths() if not hint or tag["category"] == hint]
-    choices.sort(key=lambda tag: -len(tokens.intersection(words(" ".join(tag["path"])).split())))
+def assisted(row, hint, complete, choices, profile=None):
     existing = {f"tag:{tag['id']}": tag for tag in choices[:80]}
     paths = {
         "/".join((root, *path)): (root, path)
@@ -42,9 +40,12 @@ def assisted(row, hint, complete):
         "title": row["title"],
         "description": row["description"],
     }
+    if profile:
+        payload["growth_context"] = profile
     prompt = (
         "You classify a task. Read the title and description together. Decide what the person is trying "
         "to accomplish. Choose the most specific tag for that intention from the supplied taxonomy. "
+        "Use any growth context only to resolve a close choice already supported by the task. "
         "A location is not an intention. When the text gives no subject or goal, ask for clarification. "
         "Output JSON only. For clarification return {\"target\":null}. Otherwise return "
         '{"source":"description","target":"root/branch"} using the actual target string and the name '
@@ -82,16 +83,21 @@ def assisted(row, hint, complete):
     return Selection(root, path, source)
 
 
-def run(complete=None, model="", limit=10):
+def run(complete=None, model="", limit=10, *, semantic=None, mode=None, profile=None, share_context=False):
+    mode = mode or ("api" if complete else "static")
+    profile = profile or {}
+    policy = hashlib.sha256(json.dumps([mode, profile, model, share_context], sort_keys=True).encode()).hexdigest()
     stats = dict(classified=0,pending=0,calls=0,errors=0,skipped=0)
     # v1 never recorded an explicit category hint. Only revisit its known catch-all.
     rows = db.query("""SELECT id,title,description,category,classification, ARRAY(SELECT tag_id FROM task_tags WHERE task_id=tasks.id) AS links FROM tasks
         WHERE (assigned_to=1 OR assigned_to IS NULL) AND (
           (classification->>'method'='default' AND category='mental') OR
           (classification->>'policy_version'='2' AND
-            (classification->>'method'='pending' OR (classification->>'method'='catalog' AND classification->>'catalog_revision' IS DISTINCT FROM %s) OR title IS DISTINCT FROM classification->>'input_title'
+            (classification->>'method'='pending' OR
+             ((classification->>'method'='needs_context' OR (%s AND classification->>'method'='nlp')) AND classification->>'policy' IS DISTINCT FROM %s)
+             OR (classification->>'method'='catalog' AND classification->>'catalog_revision' IS DISTINCT FROM %s) OR title IS DISTINCT FROM classification->>'input_title'
              OR description IS DISTINCT FROM classification->>'input_description')))
-        ORDER BY classification->>'attempted_at' NULLS FIRST,id""",(str(REVISION),))
+        ORDER BY classification->>'attempted_at' NULLS FIRST,id""",(semantic is not None,policy,str(REVISION)))
     for row in rows:
         old = row["classification"]
         ours = {old["tag_id"]} if old.get("tag_id") else set()
@@ -104,10 +110,26 @@ def run(complete=None, model="", limit=10):
         root,path,method = lookup(row["title"],row["description"],hint)
         selection = None
         existing = None
+        support = None
+        tags = []
+        if not path and (semantic or complete):
+            tags = [t for t in tag_paths() if not hint or t["category"] == hint]
+        if not path and semantic:
+            from .semantic import candidates
+            ranked = semantic.rank(row, candidates(tags, hint))
+            tags_by_id = {t["id"]: t for t in tags}
+            tags = [tags_by_id[item.tag_id] for item, *_ in ranked if item.tag_id is not None]
+            result = semantic.choose(row, ranked)
+            if result:
+                item, support = result
+                root, path, existing = item.root, list(item.path), item.tag_id
+                method = "nlp"
+            elif not complete:
+                method = "needs_context"
         if not path and complete and stats["calls"] < limit:
             stats["calls"] += 1
             try:
-                selection = assisted(row,hint,complete)
+                selection = assisted(row, hint, complete, tags, profile if share_context else None)
                 if selection:
                     root, path, existing = selection.category, selection.path, selection.tag_id
                     method = "provider"
@@ -117,7 +139,6 @@ def run(complete=None, model="", limit=10):
                 stats["errors"] += 1
         elif not path and complete and old.get("method")=="pending":
             stats["pending"] += 1
-            # Leave unattempted rows first in line for tomorrow's budget.
             continue
         with db.cursor() as cur:
             cur.execute(governance.LOCK)
@@ -142,10 +163,12 @@ def run(complete=None, model="", limit=10):
                     cur.execute("DELETE FROM task_tags WHERE task_id=%s AND tag_id=%s",(row["id"],old["tag_id"]))
                 if tag:
                     cur.execute("INSERT INTO task_tags(task_id,tag_id) VALUES (%s,%s)",(row["id"],tag))
-            decision = dict(policy_version=2,catalog_revision=REVISION,method=method,tag_id=tag,path=path,hint=hint,
+            decision = dict(policy_version=2,policy=policy,catalog_revision=REVISION,method=method,tag_id=tag,path=path,hint=hint,
                             assigned_category=root,input_title=row["title"],input_description=row["description"],
                             attempted_at=datetime.now(timezone.utc).isoformat())
-            if method in ("provider", "needs_context"):
+            if support is not None:
+                decision.update(encoder="all-MiniLM-L6-v2", verifier="nli-deberta-v3-xsmall", entailment=support)
+            if complete and method in ("provider", "needs_context"):
                 decision["model"] = model
             if selection:
                 decision["evidence_source"] = selection.evidence_source
