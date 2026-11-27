@@ -55,11 +55,59 @@ def test_local_provider_and_malformed_output_fallback(owner, monkeypatch):
             monkeypatch.setenv("OMNI_AI_PROVIDER","local")
             monkeypatch.setenv("OMNI_AI_MODEL","test-model")
             monkeypatch.setenv("OMNI_LOCAL_BASE_URL",f"http://127.0.0.1:{server.server_port}/v1")
-            server.answer = '{"category":"mental","path":["Arts","Music"]}'
-            task = owner.post("/api/tasks",json={"title":"Learn piano"}).json()
-            assert task["classification"]["method"] == "provider"
+            from utils.daily import run
+            from omnikit.providers import complete
+            unknown = owner.post("/api/tasks",json={"title":"Prepare for tomorrow"}).json()
+            assert unknown["category"] == "unclassified"
+            server.answer = '{"category":"mental","base":"Music","leaf":"Harmony"}'
+            result = run(complete,"test-model")
+            assert result["classified"] == result["calls"] == 1
+            assert run(complete,"test-model")["calls"] == 0
+            owner.post("/api/tasks",json={"title":"Figure things out"})
             server.answer = "malformed"
-            assert governance.suggest(TaskCreate(title="Learn piano")) == ("mental",["Learning"],"keyword")
+            assert run(complete,"test-model")["errors"] == 1
         finally:
             server.shutdown()
             thread.join()
+
+
+@pytest.mark.parametrize("title,category,tag", [
+    ("Do three sets of squats at the gym","physical","Strength Training"),
+    ("Practice Python algorithms","mental","Computer Science"),
+    ("Pay rent","financial","Bills"),
+    ("Catch up with a friend","social","Relationships"),
+    ("Prepare for tomorrow","unclassified",None),
+])
+def test_catalog_capture(owner,title,category,tag):
+    row = owner.post("/api/tasks",json={"title":title}).json()
+    assert row["category"] == category
+    assert row["classification"]["path"] == ([tag] if tag else [])
+
+
+def test_old_fallback_and_changed_title(owner,clean_db):
+    from utils.daily import run
+    task = owner.post("/api/tasks",json={"title":"Read a book"}).json()
+    tid = task["id"]
+    clean_db.query("""update tasks set title='Lift weights', classification=
+        jsonb_build_object('policy_version',1,'method','default','tag_id',%s::int) where id=%s""",
+        (task["classification"]["tag_id"],tid))
+    assert run()["classified"] == 1
+    assert clean_db.query("select category from tasks where id=%s",(tid,))[0]["category"] == "physical"
+    clean_db.query("update tasks set title='Pay rent' where id=%s",(tid,))
+    assert run()["classified"] == 1
+    assert clean_db.query("select category from tasks where id=%s",(tid,))[0]["category"] == "financial"
+
+
+def test_model_budget_and_manual_links(owner,clean_db):
+    from utils.daily import run
+    for title in ("Prepare tomorrow","Think ahead","Try something new"):
+        owner.post("/api/tasks",json={"title":title})
+    answer = lambda _: '{"category":"social","base":"Community"}'
+    assert run(answer,"example",1)["calls"] == 1
+    assert run(answer,"example",1)["classified"] == 1
+    unmatched = clean_db.query("select id from tasks where category='unclassified'")[0]["id"]
+    tag = clean_db.query("select id from tags limit 1")[0]["id"]
+    clean_db.query("insert into task_tags(task_id,tag_id) values (%s,%s)",(unmatched,tag))
+    result = run(answer,"example",1)
+    assert result["skipped"] == 1 and result["calls"] == 0
+    assert clean_db.query("select tag_id from task_tags where task_id=%s",(unmatched,)) == [{"tag_id":tag}]

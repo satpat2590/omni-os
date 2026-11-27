@@ -10,6 +10,12 @@ Open **Atma** from Finder or Spotlight. Enter the title of an activity and choos
 
 Open **Omni** to start or stop the platform, choose whether opening Atma starts it, and configure domains and automations. An automation runs an executable you choose under your own account. Use **Run** to start it on demand. Its status comes from the Omni run ledger. Closing a window leaves the platform available. **Stop Omni** shuts down this installation's database.
 
+## Atma classification
+
+Omni → Atma classification controls the daily pass. It defaults to the offline catalog. For unresolved tasks, select **Catalog and model**, enter an OpenAI-compatible base URL, model ID and optional API key, then save. OpenRouter uses `https://openrouter.ai/api/v1`. A local server can use a loopback URL such as `http://127.0.0.1:8080/v1`. Remote endpoints require HTTPS. The key is stored in the installing account’s private, mode-600 classifier settings file outside version control. Changing the endpoint clears the old key unless you enter a replacement.
+
+Use **Classify now** for an immediate pass. The per-user LaunchAgent runs at 3 AM local time and checks at login. A stopped Omni database stays stopped. The report gives call, classification, pending and error counts. Switch back to offline mode to keep task content on this Mac.
+
 ## Development
 
 Atma's local service code lives in `atma/api`. The two SwiftUI apps live in `mac` and share a local command interface in `scripts/desktop.py`. Routine Mac use requires no HTTP listener. The script runner and run ledger live in `core`. Environment-specific registries, agent harnesses and other domains can be added by an instance owner. See the [product requirements](docs/PRODUCT.md), [data model](docs/DATA-MODEL.md) and [base development workflow](docs/DEVELOPMENT.md).

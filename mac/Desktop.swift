@@ -11,7 +11,16 @@ struct Job: Codable, Identifiable {
     var id: String { name }
     let name: String, domain: String, enabled: Bool, status: String?
 }
+struct ClassificationReport: Decodable {
+    var day: String?, state: String?, classified: Int?, pending: Int?, calls: Int?, errors: Int?
+}
+struct ClassifierSettings: Decodable {
+    var mode: String, endpoint: String, model: String, limit: Int, daily: Bool, hasKey: Bool
+    var report: ClassificationReport
+}
 struct Snapshot: Decodable {
+    var classifier: ClassifierSettings?
+
     var running = false, autoStart = true
     var domains = [String](), jobs = [Job]()
     var tasks: [Item]?, tree: [Branch]?
@@ -140,6 +149,57 @@ struct AtmaView: View {
     }
 }
 
+struct ClassifierForm: View {
+    @ObservedObject var store: Store
+    let settings: ClassifierSettings
+    @State private var mode: String
+    @State private var endpoint: String
+    @State private var model: String
+    @State private var key = ""
+    @State private var forget = false
+    @State private var limit: Int
+    @State private var daily: Bool
+
+    init(store: Store, settings: ClassifierSettings) {
+        self.store = store
+        self.settings = settings
+        _mode = State(initialValue:settings.mode)
+        _endpoint = State(initialValue:settings.endpoint)
+        _model = State(initialValue:settings.model)
+        _limit = State(initialValue:settings.limit)
+        _daily = State(initialValue:settings.daily)
+    }
+
+    var body: some View {
+        Section("Atma classification") {
+            Picker("Classifier", selection:$mode) {
+                Text("Offline catalog").tag("offline")
+                Text("Catalog and model").tag("compatible")
+            }
+            if mode == "compatible" {
+                TextField("API base URL",text:$endpoint)
+                TextField("Model ID",text:$model)
+                SecureField(settings.hasKey ? "Replace saved API key" : "API key (optional for local models)",text:$key)
+                if settings.hasKey { Toggle("Forget saved key",isOn:$forget) }
+                Stepper("Up to \(limit) model calls per pass",value:$limit,in:1...100)
+                Text("Unresolved task titles, descriptions and candidate tags go to this endpoint. Use the model ID to choose your provider’s pricing tier.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Toggle("Classify daily at 3 AM",isOn:$daily)
+            HStack {
+                Button("Save settings") {
+                    store.request("classifierSave",["mode":mode,"endpoint":endpoint,"model":model,"key":key,"forgetKey":forget,"daily":daily,"limit":limit]) { key=""; forget=false }
+                }
+                Button("Classify now") { store.request("classify") }.disabled(!store.data.running)
+            }
+            if let state = settings.report.state {
+                Text("Last pass: \(settings.report.day ?? "") · \(state) · \(settings.report.classified ?? 0) classified · \(settings.report.pending ?? 0) pending · \(settings.report.calls ?? 0) calls · \(settings.report.errors ?? 0) provider errors")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 struct OmniView: View {
     @ObservedObject var store: Store
     @State private var domain = ""
@@ -159,6 +219,7 @@ struct OmniView: View {
                     NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory()+"/Applications/Atma.app"))
                 }
             }
+            if let settings = store.data.classifier { ClassifierForm(store:store,settings:settings) }
             Section("Domains") {
                 ForEach(store.data.domains,id:\.self) { entry in
                     HStack {
@@ -224,7 +285,7 @@ struct WindowContent: View {
         }.padding(22).frame(minWidth:520,minHeight:430)
         .task { store.request(atma ? "openAtma":"platform") }
         .onReceive(Timer.publish(every: 4, on: .main, in: .common).autoconnect()) { _ in
-            if !atma && store.data.running && !store.data.jobs.isEmpty && store.error.isEmpty && !store.busy {
+            if !atma && store.data.running && (!store.data.jobs.isEmpty || store.data.classifier?.report.state == "running") && store.error.isEmpty && !store.busy {
                 store.request("platform")
             }
         }

@@ -684,6 +684,7 @@ async def update_task(
             update_data["description"] = task.description
         if "category" in provided:
             update_data["category"] = task.category
+            update_data["classification"] = None  # A manual category supersedes automatic routing.
         if "priority" in provided:
             update_data["priority"] = task.priority
         if "due_date" in provided:

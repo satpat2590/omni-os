@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import classifier
 from local import ROOT, STATE, PG, REGISTRY, preflight, cluster, runtime_env
 
 SETTINGS = STATE / "desktop-settings.json"
@@ -30,6 +31,8 @@ def tree(tasks, tags, links):
     for link in links:
         by_task.setdefault(link["task_id"], []).append(link["tag_id"])
     for t in tasks:
+        if t["category"] == "unclassified" and "unclassified" not in roots:
+            roots["unclassified"] = dict(id="unclassified", title="Unclassified", children=[])
         parents = [nodes[i] for i in by_task.get(t["id"], []) if i in nodes] or [roots.get(t["category"])]
         for parent in filter(None, parents):
             parent["children"].append(dict(id=f"{parent['id']}-task-{t['id']}",title=t["title"],points=t["points"]))
@@ -48,6 +51,13 @@ def operation(action, data):
     if registry["jobs"].get("mindmap") == demo:
         del registry["jobs"]["mindmap"]
         save(REGISTRY, registry)
+    if action=="classifierSave":
+        classifier.configure(data)
+    if action=="classify":
+        if not running:
+            raise ValueError("Start Omni first.")
+        subprocess.Popen([sys.executable,str(ROOT/"scripts/classifier.py"),"manual"],
+                         stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
     if action == "autoStart":
         cfg["autoStart"] = bool(data["enabled"])
         save(SETTINGS, cfg)
@@ -96,7 +106,7 @@ def operation(action, data):
                 fcntl.flock(guard,fcntl.LOCK_SH)
                 subprocess.Popen([STATE/"base/bin/omni","--registry",REGISTRY,"run",name], stdout=log,
                                  stderr=log,stdin=subprocess.DEVNULL,start_new_session=True,pass_fds=(guard.fileno(),))
-    platform = {"running":running,"autoStart":cfg["autoStart"],"domains":sorted(registry["domains"]),
+    platform = {"classifier":classifier.public(),"running":running,"autoStart":cfg["autoStart"],"domains":sorted(registry["domains"]),
                 "jobs":[dict(name=k,domain=v["domain"],enabled=v.get("enabled",True)) for k,v in registry["jobs"].items()]}
     if not running or action not in ("openAtma","startAtma","tasks","add","edit","complete","archive"):
         if running and platform["jobs"]:

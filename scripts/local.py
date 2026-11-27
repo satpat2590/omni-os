@@ -112,6 +112,8 @@ def main():
     run(STATE/"base/bin/omni","migrate",env=env)
     from bundles import install_apps
     install_apps(ROOT, STATE)
+    from classifier import install_schedule
+    install_schedule()
 
 
 if __name__ == "__main__":
