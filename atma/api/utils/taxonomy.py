@@ -1,11 +1,13 @@
 """A small, versioned routing vocabulary. Only tags used by tasks enter the tree."""
 import re
 
+REVISION = 1
+
 CATALOG = {
     "physical": {
-        "Strength Training": "strength training|lift weights|lifting weights|weight training|weightlifting|deadlift|deadlifts|squat|squats|bench press|push up|pushups|gym",
+        "Strength Training": "strength training|lift weights|lifting weights|weight training|weightlifting|deadlift|deadlifts|squat|squats|bench press|push up|pushups",
         "Endurance": "running|jogging|swimming|cycling|cardio|marathon|go for a run|5k",
-        "Movement": "walk|walking|hike|hiking|yoga|pilates|workout|stretch|exercise",
+        "Movement": "gym|walk|walking|hike|hiking|yoga|pilates|workout|stretch|exercise",
         "Nutrition": "meal prep|nutrition|protein|healthy meals|groceries",
         "Health": "dentist|doctor|checkup|physical therapy|sleep|medication",
     },
@@ -30,7 +32,7 @@ CATALOG = {
         "Communication": "public speaking|active listening|give feedback",
     },
 }
-GENERIC = {"learn","read","study","book","course"}
+GENERIC = {"gym","learn","read","study","book","course"}
 
 
 def words(value):

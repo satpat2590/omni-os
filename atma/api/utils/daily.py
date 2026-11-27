@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import governance
 from .db import db
-from .taxonomy import CATALOG, lookup, words
+from .taxonomy import CATALOG, REVISION, lookup, words
 
 
 def tag_paths():
@@ -53,9 +53,9 @@ def run(complete=None, model="", limit=10):
         WHERE (assigned_to=1 OR assigned_to IS NULL) AND (
           (classification->>'method'='default' AND category='mental') OR
           (classification->>'policy_version'='2' AND
-            (classification->>'method'='pending' OR title IS DISTINCT FROM classification->>'input_title'
+            (classification->>'method'='pending' OR (classification->>'method'='catalog' AND classification->>'catalog_revision' IS DISTINCT FROM %s) OR title IS DISTINCT FROM classification->>'input_title'
              OR description IS DISTINCT FROM classification->>'input_description')))
-        ORDER BY classification->>'attempted_at' NULLS FIRST,id""")
+        ORDER BY classification->>'attempted_at' NULLS FIRST,id""",(str(REVISION),))
     for row in rows:
         old = row["classification"]
         ours = {old["tag_id"]} if old.get("tag_id") else set()
@@ -103,7 +103,7 @@ def run(complete=None, model="", limit=10):
                     cur.execute("DELETE FROM task_tags WHERE task_id=%s AND tag_id=%s",(row["id"],old["tag_id"]))
                 if tag:
                     cur.execute("INSERT INTO task_tags(task_id,tag_id) VALUES (%s,%s)",(row["id"],tag))
-            decision = dict(policy_version=2,method=method,tag_id=tag,path=path,hint=hint,
+            decision = dict(policy_version=2,catalog_revision=REVISION,method=method,tag_id=tag,path=path,hint=hint,
                             assigned_category=root,input_title=row["title"],input_description=row["description"],
                             attempted_at=datetime.now(timezone.utc).isoformat())
             if method=="provider":

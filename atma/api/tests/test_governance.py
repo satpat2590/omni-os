@@ -42,6 +42,7 @@ def test_local_provider_and_malformed_output_fallback(owner, monkeypatch):
     class Server(BaseHTTPRequestHandler):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            assert self.headers["Authorization"] == "Bearer test-dummy"
             assert self.path == "/v1/chat/completions" and body["model"] == "test-model"
             reply = json.dumps({"choices":[{"message":{"content":self.server.answer}}]}).encode()
             self.send_response(200)
@@ -52,9 +53,10 @@ def test_local_provider_and_malformed_output_fallback(owner, monkeypatch):
         thread = Thread(target=server.serve_forever,daemon=True)
         thread.start()
         try:
-            monkeypatch.setenv("OMNI_AI_PROVIDER","local")
+            monkeypatch.setenv("OMNI_AI_PROVIDER","compatible")
+            monkeypatch.setenv("OMNI_AI_KEY","test-dummy")
             monkeypatch.setenv("OMNI_AI_MODEL","test-model")
-            monkeypatch.setenv("OMNI_LOCAL_BASE_URL",f"http://127.0.0.1:{server.server_port}/v1")
+            monkeypatch.setenv("OMNI_AI_BASE_URL",f"http://127.0.0.1:{server.server_port}/v1")
             from utils.daily import run
             from omnikit.providers import complete
             unknown = owner.post("/api/tasks",json={"title":"Prepare for tomorrow"}).json()
@@ -74,6 +76,7 @@ def test_local_provider_and_malformed_output_fallback(owner, monkeypatch):
 @pytest.mark.parametrize("title,category,tag", [
     ("Do three sets of squats at the gym","physical","Strength Training"),
     ("Practice Python algorithms","mental","Computer Science"),
+    ("Go to the Gym","physical","Movement"),
     ("Pay rent","financial","Bills"),
     ("Catch up with a friend","social","Relationships"),
     ("Prepare for tomorrow","unclassified",None),
@@ -111,3 +114,32 @@ def test_model_budget_and_manual_links(owner,clean_db):
     result = run(answer,"example",1)
     assert result["skipped"] == 1 and result["calls"] == 0
     assert clean_db.query("select tag_id from task_tags where task_id=%s",(unmatched,)) == [{"tag_id":tag}]
+
+
+def test_endpoint_credentials_are_bound_to_destination(tmp_path, monkeypatch):
+    import sys
+    from pathlib import Path
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3]/"scripts"))
+    import classifier
+    monkeypatch.setattr(classifier,"CONFIG",tmp_path/"settings")
+    monkeypatch.setattr(classifier,"REPORT",tmp_path/"report")
+    settings = dict(classifier.DEFAULT,mode="compatible",model="example",key="test-only")
+    classifier.configure(settings)
+    assert classifier.CONFIG.stat().st_mode & 0o777 == 0o600
+    assert classifier.public()["hasKey"] and "key" not in classifier.public()
+    classifier.configure(dict(settings,key="",model="cheaper-model"))
+    assert classifier.config()["key"] == "test-only"
+    classifier.configure(dict(settings,key="",endpoint="https://models.example/v1"))
+    assert not classifier.public()["hasKey"]
+    with pytest.raises(ValueError):
+        classifier.configure(dict(settings,endpoint="http://models.example/v1"))
+
+
+def test_existing_catalog_id_reused(owner,clean_db):
+    from utils.daily import run
+    known = owner.post("/api/tasks",json={"title":"Practice guitar"}).json()
+    task = owner.post("/api/tasks",json={"title":"Rehearse the new arrangement"}).json()
+    assert task["category"] == "unclassified"
+    tag = known["classification"]["tag_id"]
+    assert run(lambda _:json.dumps({"existing":tag}),"model")["classified"] == 1
+    assert clean_db.query("select tag_id from task_tags where task_id=%s",(task["id"],)) == [{"tag_id":tag}]

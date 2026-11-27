@@ -108,6 +108,8 @@ def operation(action, data):
                                  stderr=log,stdin=subprocess.DEVNULL,start_new_session=True,pass_fds=(guard.fileno(),))
     platform = {"classifier":classifier.public(),"running":running,"autoStart":cfg["autoStart"],"domains":sorted(registry["domains"]),
                 "jobs":[dict(name=k,domain=v["domain"],enabled=v.get("enabled",True)) for k,v in registry["jobs"].items()]}
+    if action == "classify":
+        platform["classifier"]["report"]["state"] = "running"
     if not running or action not in ("openAtma","startAtma","tasks","add","edit","complete","archive"):
         if running and platform["jobs"]:
             import psycopg2

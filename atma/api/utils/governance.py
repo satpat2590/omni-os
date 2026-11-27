@@ -5,7 +5,7 @@ import re
 
 from .db import db
 
-from .taxonomy import lookup
+from .taxonomy import REVISION, lookup
 
 LOCK = "LOCK TABLE tags IN SHARE ROW EXCLUSIVE MODE"
 
@@ -48,7 +48,7 @@ def create(task, assigned, creator):
                        recurrence_pattern,assigned_to,created_by,classification) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                        RETURNING *""", (task.title,task.description,category,task.priority,task.due_date,
                        task.is_recurring,task.recurrence_pattern,assigned,creator,
-                       json.dumps({"method": method, "tag_id": tag, "path": path, "policy_version": 2, "assigned_category": category, "hint": task.category, "input_title": task.title, "input_description": task.description})))
+                       json.dumps({"method": method, "tag_id": tag, "path": path, "policy_version": 2, "catalog_revision": REVISION, "assigned_category": category, "hint": task.category, "input_title": task.title, "input_description": task.description})))
         row = dict(cur.fetchone())
         if tag is not None:
             cur.execute("INSERT INTO task_tags(task_id,tag_id) VALUES (%s,%s)", (row["id"], tag))
