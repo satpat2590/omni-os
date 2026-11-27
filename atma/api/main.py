@@ -920,7 +920,8 @@ async def get_skill_tree():
         "children": [],
     }
 
-    available_categories = sorted({tag["category"] for tag in tags if tag.get("category")})
+    available_categories = sorted({tag["category"] for tag in tags if tag.get("category")} |
+                                  {task["category"] for task in tasks if task.get("category")})
     categories = [category for category in DEFAULT_CATEGORIES if category in available_categories] + [
         category for category in available_categories if category not in DEFAULT_CATEGORIES
     ]

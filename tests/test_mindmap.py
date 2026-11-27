@@ -47,3 +47,17 @@ def test_identical_field_embeddings_still_render(tmp_path, monkeypatch):
     graph = json.loads((tmp_path / "graph.json").read_text())
     assert len([n for n in graph["nodes"] if n["type"] == "field"]) == 2
     assert all(math.isfinite(node[axis]) for node in graph["nodes"] for axis in ("x", "y"))
+
+
+def test_unclassified_activity_stays_out_of_mental_rollup(tmp_path,monkeypatch):
+    tasks = [{"id":1,"category":"unclassified","title":"Try this","priority":3,
+              "assigned_to":{"id":1,"name":"Me","type":"human"},"tag_ids":[]}]
+    monkeypatch.setattr(mindmap,"fetch_atma",lambda: ({},[],tasks,{},{}))
+    monkeypatch.setattr(mindmap,"OUT_DIR",tmp_path)
+    monkeypatch.setattr(mindmap,"GRAPH_JSON",tmp_path/"graph.json")
+    mindmap.main()
+    graph=json.loads((tmp_path/"graph.json").read_text())
+    nodes={n["id"]:n for n in graph["nodes"]}
+    assert nodes["domain-mental"]["task_count"] == 0
+    assert nodes["domain-unclassified"]["task_count"] == 1
+    assert any(e["target"]=="domain-unclassified" and e["source"]=="task-1" for e in graph["edges"])

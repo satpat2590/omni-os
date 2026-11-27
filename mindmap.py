@@ -122,6 +122,9 @@ def main():
     DOMAIN_FOLD = {}   # a category outside the four roots folds into one of them; extend per machine
     ROOT_DOMAINS = ("physical", "mental", "financial", "social")
 
+    if any(task["category"] == "unclassified" for task in tasks):
+        ROOT_DOMAINS += ("unclassified",)
+
     def fold(cat):
         return DOMAIN_FOLD.get(cat, cat) if cat in ROOT_DOMAINS or cat in DOMAIN_FOLD else "mental"
 
