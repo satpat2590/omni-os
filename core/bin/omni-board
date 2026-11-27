@@ -1,0 +1,19 @@
+#!/bin/bash
+# omni-board ARGS...: the shared development board (`omni board`), with this machine's settings loaded.
+#
+#   OMNI_AGENT=codex core/bin/omni-board list
+#
+# The board's address (OMNI_BOARD_URL) comes from the same env files services use, through
+# omni-svc, in this process only. Run it from any directory; relative paths (--body-file) still work.
+set -euo pipefail
+core="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -n "${OMNI_SVC:-}" ]; then svc="$OMNI_SVC"
+elif [ -x "$HOME/bin/omni-svc" ]; then svc="$HOME/bin/omni-svc"
+else svc="$core/bin/omni-svc"; fi
+py="${OMNI_PYTHON:-}"
+for candidate in "$core/.venv/bin/python" "$core/../.omni-local/base/bin/python"; do
+    [ -n "$py" ] && break
+    [ -x "$candidate" ] && py="$candidate"
+done
+[ -n "$py" ] || { echo "omni-board: no Python with Omni core (create core/.venv; see .agents/skills/omni-test)" >&2; exit 2; }
+PYTHONPATH="$core${PYTHONPATH:+:$PYTHONPATH}" exec "$svc" "$py" -m omni_core.cli board "$@"

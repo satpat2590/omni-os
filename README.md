@@ -29,6 +29,6 @@ Choose **Classify now** for an immediate pass. The scheduled pass runs at 3 AM l
 
 ## Development
 
-Atma's local service code lives in `atma/api`. The two SwiftUI apps live in `mac` and share a local command interface in `scripts/desktop.py`. Routine Mac use requires no HTTP listener. The script runner and run ledger live in `core`. Environment-specific registries, agent harnesses and other domains can be added by an instance owner. See the [product requirements](docs/PRODUCT.md), [data model](docs/DATA-MODEL.md) and [base development workflow](docs/DEVELOPMENT.md).
+Atma's local service code lives in `atma/api`. The two SwiftUI apps live in `mac` and share a local command interface in `scripts/desktop.py`. Routine Mac use requires no HTTP listener. The script runner and run ledger live in `core`. Environment-specific registries, agent harnesses and other domains can be added by an instance owner. See the [product requirements](docs/PRODUCT.md), [data model](docs/DATA-MODEL.md) and [base development workflow](docs/DEVELOPMENT.md). Coding agents start with [`AGENTS.md`](AGENTS.md).
 
 Run `./install.sh test` after installation for the integrated suites. Install the app build again after changing Swift code. This is a locally compiled macOS alpha. A distribution license has yet to be selected.

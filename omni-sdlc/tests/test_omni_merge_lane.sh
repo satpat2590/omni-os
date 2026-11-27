@@ -116,7 +116,8 @@ git -C "$LIVE" checkout -q main
 echo "== 4. a repo whose base is NOT main merges into that base"
 git -C "$LIVE" checkout -q -b instance/me main
 git -C "$LIVE" push -q -u origin instance/me 2>/dev/null
-sed -i '' 's/base: "main"/base: "instance\/me"/' "$WORK/repos.yaml"
+# perl -pi, not sed -i: BSD sed (macOS) and GNU sed (Linux, CI) disagree on -i's argument.
+perl -pi -e 's/base: "main"/base: "instance\/me"/' "$WORK/repos.yaml"
 MAIN_BEFORE="$(git -C "$LIVE" rev-parse main)"
 bash "$BRANCH_TOOL" "$LIVE" dev inst-ok >/dev/null 2>&1
 WT4="$LIVE/.worktrees/dev-inst-ok"

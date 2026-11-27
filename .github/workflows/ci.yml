@@ -1,0 +1,73 @@
+# Every change to Omni OS, from any agent or person, passes the same gate before it reaches main.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGPASSWORD: ci-only-password
+      ATMA_TEST_SERVER_URL: postgresql://postgres@localhost:5432/postgres
+      OMNI_TEST_SERVER_URL: postgresql://postgres@localhost:5432/postgres
+      PYTHON_DOTENV_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Environments
+        run: |
+          uv venv --python 3.12 core/.venv
+          uv pip install --python core/.venv/bin/python -e "core[dev]" -e lib numpy scikit-learn
+          uv venv --python 3.12 atma/api/.venv
+          uv pip install --python atma/api/.venv/bin/python -r atma/api/requirements-dev.txt -e lib
+      - name: Core (registry, runner, ledger, launchd, board)
+        run: cd core && .venv/bin/python -m pytest -q
+      - name: Atma API
+        run: cd atma/api && .venv/bin/python -m pytest -q
+      - name: classify, lib, hygiene and root tests
+        run: PYTHONPATH=.:lib/src core/.venv/bin/python -m pytest -q classify/tests lib/tests tests
+      - name: SDLC tools
+        env:
+          OMNI_PYTHON: ${{ github.workspace }}/core/.venv/bin/python
+        run: |
+          bash omni-sdlc/tests/test_omni_branch.sh
+          bash omni-sdlc/tests/test_omni_merge_lane.sh
+
+  hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Base names nobody and no machine
+        run: python3 scripts/hygiene.py
+
+  traceability:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit names its card and agent
+        run: python3 scripts/check_trailers.py "origin/${{ github.base_ref }}..HEAD"

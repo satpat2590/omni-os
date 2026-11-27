@@ -80,7 +80,7 @@ def _pi_event(kind, role, total, i=0, o=0):
 
 def test_pi_command_and_cost_from_assistant_message_ends(tmp_path):
     inv = adapters.build(PI, _job("pi", prompt="p", model="m", tools=("read", "ls")), "p", tmp_path)
-    assert inv.argv == ["/bin/echo", "-p", "--mode", "json", "--no-session", "--provider",
+    assert inv.argv == ["/bin/echo", "-p", "--mode", "json", "--no-session", "--approve", "--provider",
                         "openrouter", "--model", "m", "--tools", "read,ls", "p"]
     stdout = "\n".join([
         _pi_event("message_end", "user", 9.0),                  # not the model's spend
